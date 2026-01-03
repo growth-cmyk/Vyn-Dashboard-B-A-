@@ -5,6 +5,10 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  base: './',
+  css: {
+    postcss: './postcss.config.js',
+  },
   build: {
     target: 'es2015',
     outDir: 'dist',

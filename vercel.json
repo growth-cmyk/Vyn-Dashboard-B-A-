@@ -1,0 +1,11 @@
+{
+  "buildCommand": "cd inventory-dashboard && npm run build",
+  "outputDirectory": "inventory-dashboard/dist",
+  "installCommand": "cd inventory-dashboard && npm install",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
