@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Dashboard Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .results {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 3px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Dashboard Manual Test</h1>
+    <p>This page tests the dashboard components with sample data to ensure everything is working correctly.</p>
+    
+    <div class="test-section">
+        <h3>Test 1: Data Loading</h3>
+        <button onclick="testDataLoading()">Test Data Loading</button>
+        <div id="dataLoadingResults" class="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test 2: Analytics Calculations</h3>
+        <button onclick="testAnalytics()">Test Analytics</button>
+        <div id="analyticsResults" class="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test 3: Filtering</h3>
+        <button onclick="testFiltering()">Test Filtering</button>
+        <div id="filteringResults" class="results"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Test 4: Export Functions</h3>
+        <button onclick="testExport()">Test Export</button>
+        <div id="exportResults" class="results"></div>
+    </div>
+
+    <script type="module">
+        // Import the services we need to test
+        import { DataService } from './src/services/DataService.js';
+        import { AnalyticsService } from './src/services/AnalyticsService.js';
+        import { FilterService } from './src/services/FilterService.js';
+        import { ExportService } from './src/services/ExportService.js';
+
+        // Sample CSV data for testing
+        const sampleInventoryCSV = `Item ID,Item Name,Brand Name,UPC,UoM,Warehouse Facility ID,Warehouse Facility Name,Net scheduled inventory,Incoming scheduled inventory,Recalled inventory,Total sellable,Warehouse,In-between,Darkstore,Total unsellable,Damaged,Lost,Expired,Near Expiry,Last 7 days,Last 15 days,Last 30 days
+10196943,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks",Vyndo,8906170000000,360 g,43,Hyderabad H2,-12,0,12,0,0,0,0,41,0,0,1,40,0,0,0
+10196943,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks",Vyndo,8906170000000,360 g,264,Farukhnagar - SR,120,120,0,0,0,0,0,8,0,0,0,8,0,0,0
+10196943,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks",Vyndo,8906170000000,360 g,1206,Lucknow L4,0,0,0,187,111,37,39,0,0,0,0,0,4,7,12`;
+
+        const sampleSalesCSV = `S.No.,Order Id,Order Date,Item Id,Product Name,Brand Name,UPC,Variant Description,"Mapping on consumer app (L0, L1, L2)",Business Category,Supply City,Supply State,Supply State GST,Customer City,Customer State,Order Status,HSN Code,IGST(%),CGST(%),SGST(%),CESS(%),Quantity,MRP (Rs),Selling Price (Rs),IGST Value,CGST Value,SGST Value,CESS Value,Total Tax,Total Gross Bill Amount
+1,1527917492,01-12-2025,10196943,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks",Vyndo,8906170000000,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks(Pack)",Munchies -> Namkeen Snacks -> Namkeen Snacks,Grocery - Snacks & Packaged Foods,UP-NCR,Uttar Pradesh,09AAFCG9846E1Z9,Ghaziabad,Uttar Pradesh,DELIVERED,19059090,0,0,0,0,1,198,178,0,0,0,0,0,178
+2,1527099766,01-12-2025,10196943,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks",Vyndo,8906170000000,"Vyndo Masala Ragi Bhakhri, Healthy Millet Snacks(Pack)",Munchies -> Namkeen Snacks -> Namkeen Snacks,Grocery - Snacks & Packaged Foods,Raebareli,Uttar Pradesh,09AAFCG9846E1Z9,Raebareli,Uttar Pradesh,DELIVERED,19059090,0,0,0,0,1,198,178,0,0,0,0,0,178`;
+
+        function createMockFile(content, filename) {
+            const blob = new Blob([content], { type: 'text/csv' });
+            return new File([blob], filename, { type: 'text/csv' });
+        }
+
+        window.testDataLoading = async function() {
+            const resultsDiv = document.getElementById('dataLoadingResults');
+            try {
+                resultsDiv.textContent = 'Testing data loading...';
+                
+                const inventoryFile = createMockFile(sampleInventoryCSV, 'inventory.csv');
+                const salesFile = createMockFile(sampleSalesCSV, 'sales.csv');
+                
+                const inventoryData = await DataService.loadInventoryData(inventoryFile);
+                const salesData = await DataService.loadSalesData(salesFile);
+                
+                resultsDiv.textContent = `✅ SUCCESS!\nLoaded ${inventoryData.length} inventory items\nLoaded ${salesData.length} sales records`;
+                resultsDiv.parentElement.classList.add('success');
+            } catch (error) {
+                resultsDiv.textContent = `❌ ERROR: ${error.message}`;
+                resultsDiv.parentElement.classList.add('error');
+            }
+        };
+
+        window.testAnalytics = async function() {
+            const resultsDiv = document.getElementById('analyticsResults');
+            try {
+                resultsDiv.textContent = 'Testing analytics...';
+                
+                const inventoryFile = createMockFile(sampleInventoryCSV, 'inventory.csv');
+                const inventoryData = await DataService.loadInventoryData(inventoryFile);
+                
+                const analyses = inventoryData.map(item => AnalyticsService.analyzeStock(item));
+                const statusCounts = analyses.reduce((acc, item) => {
+                    acc[item.stockStatus] = (acc[item.stockStatus] || 0) + 1;
+                    return acc;
+                }, {});
+                
+                resultsDiv.textContent = `✅ SUCCESS!\nAnalyzed ${analyses.length} items\nStock status distribution: ${JSON.stringify(statusCounts, null, 2)}`;
+                resultsDiv.parentElement.classList.add('success');
+            } catch (error) {
+                resultsDiv.textContent = `❌ ERROR: ${error.message}`;
+                resultsDiv.parentElement.classList.add('error');
+            }
+        };
+
+        window.testFiltering = async function() {
+            const resultsDiv = document.getElementById('filteringResults');
+            try {
+                resultsDiv.textContent = 'Testing filtering...';
+                
+                const inventoryFile = createMockFile(sampleInventoryCSV, 'inventory.csv');
+                const inventoryData = await DataService.loadInventoryData(inventoryFile);
+                
+                const searchFiltered = FilterService.applyInventoryFilters(inventoryData, { searchTerm: 'Ragi' });
+                const locations = FilterService.getUniqueLocations(inventoryData);
+                
+                resultsDiv.textContent = `✅ SUCCESS!\nOriginal items: ${inventoryData.length}\nFiltered by 'Ragi': ${searchFiltered.length}\nUnique locations: ${locations.length}`;
+                resultsDiv.parentElement.classList.add('success');
+            } catch (error) {
+                resultsDiv.textContent = `❌ ERROR: ${error.message}`;
+                resultsDiv.parentElement.classList.add('error');
+            }
+        };
+
+        window.testExport = async function() {
+            const resultsDiv = document.getElementById('exportResults');
+            try {
+                resultsDiv.textContent = 'Testing export...';
+                
+                const inventoryFile = createMockFile(sampleInventoryCSV, 'inventory.csv');
+                const salesFile = createMockFile(sampleSalesCSV, 'sales.csv');
+                
+                const inventoryData = await DataService.loadInventoryData(inventoryFile);
+                const salesData = await DataService.loadSalesData(salesFile);
+                
+                const csvData = ExportService.exportInventoryToCSV(inventoryData);
+                const excelBuffer = ExportService.exportToExcel(inventoryData, salesData, {});
+                
+                resultsDiv.textContent = `✅ SUCCESS!\nCSV export: ${csvData.length} characters\nExcel export: ${excelBuffer.byteLength} bytes`;
+                resultsDiv.parentElement.classList.add('success');
+            } catch (error) {
+                resultsDiv.textContent = `❌ ERROR: ${error.message}`;
+                resultsDiv.parentElement.classList.add('error');
+            }
+        };
+    </script>
+</body>
+</html>

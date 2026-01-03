@@ -1,0 +1,11 @@
+sku,units-ordered,item-price,order-date,customer-city,customer-state
+AMZN-001,25,299.99,2024-12-01,Mumbai,Maharashtra
+AMZN-002,15,149.50,2024-12-02,Delhi,Delhi
+AMZN-003,30,89.99,2024-12-03,Bangalore,Karnataka
+AMZN-001,20,299.99,2024-12-04,Chennai,Tamil Nadu
+AMZN-004,10,199.99,2024-12-05,Hyderabad,Telangana
+AMZN-002,18,149.50,2024-12-06,Pune,Maharashtra
+AMZN-005,12,399.99,2024-12-07,Kolkata,West Bengal
+AMZN-003,22,89.99,2024-12-08,Ahmedabad,Gujarat
+AMZN-006,8,249.99,2024-12-09,Jaipur,Rajasthan
+AMZN-001,35,299.99,2024-12-10,Lucknow,Uttar Pradesh

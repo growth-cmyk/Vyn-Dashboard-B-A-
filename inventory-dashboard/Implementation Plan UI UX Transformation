@@ -1,0 +1,38 @@
+Overview
+The goal is to transform the "functional" interface into a "professional-grade analytics cockpit." Focus on Layout Hierarchy, Information Density, and Actionability.
+Phase 1: Layout & Navigation
+Instruction for Kiro:
+"Kiro, I want to overhaul the UI layout. Implement a fixed sidebar navigation on the left with a clean, modern aesthetic. Use Lucide-react icons for:
+Dashboard Overview (LayoutGrid icon)
+Inventory Health (Package icon)
+Sales Performance (TrendingUp icon)
+Action Center (AlertCircle icon)
+Data Management (UploadCloud icon)
+The main content area should have a subtle light-gray background (#F9FAFB) to make the white data cards 'pop'. Ensure the layout is fully responsive using Tailwind CSS and follows the Vyndo Branding Guide."
+Phase 2: High-Level Analytics (KPI Bento Grid)
+Instruction for Kiro:
+"Create a KPI Summary Row at the top of the dashboard. Use a 'Bento Grid' style with white cards for:
+Total Inventory Value: (Aggregate total sellable * MRP).
+Out-of-Stock Risk: (Count of items with 0 days of cover - use a red 'urgent' theme).
+Low Stock Alerts: (Count of items with <7 days cover - use an amber theme).
+Top Selling SKU: (Based on last 30 days quantity).
+Each card should include a small 'sparkline' chart (using Chart.js) showing the 7-day trend for that metric."
+Phase 3: Inventory Intelligence (Action-Oriented Table)
+Instruction for Kiro:
+"Refactor the Inventory Table to improve UX:
+Sticky Header: Ensure the table headers stay visible while scrolling.
+Status Badges: Use 'Pill' badges (e.g., Red bg with dark red text for 'Out of Stock') instead of plain text.
+Progress Bars: For 'Days of Cover', add a horizontal progress bar inside the cell that visually represents the stock level (e.g., a bar that fills up to 30 days).
+Quick Actions: Add an 'Action' column with a 'View Details' button that opens a slide-over (Sheet) component showing that SKU's specific performance across all warehouses."
+Phase 4: Sales Insights (Intelligent Charting)
+Instruction for Kiro:
+"Update the Sales Analytics tab:
+Implement a Stacked Bar Chart showing sales by Warehouse Location, with a toggle to switch to a Line Chart for time-series analysis.
+Sync the Chart.js theme with our brand colors (Slate-900 for text, Vyndo Orange for primary data).
+Add a 'Comparison Toggle' to overlay 'Last 30 Days' sales vs. 'Previous 30 Days' sales to visualize growth/decline."
+Phase 5: Data Onboarding (Upload UX)
+Instruction for Kiro:
+"Improve the data loading experience:
+Create a 'Drag & Drop' zone for CSV uploads with a dashed border.
+Add a Progress Stepper showing: 'File Uploaded' -> 'Validating Schema' -> 'Calculating Metrics' -> 'Dashboard Ready'.
+Implement Toast Notifications for errors, specifically naming any missing headers detected during validation."

@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global CSS Reset and Base Styles */
+* {
+  box-sizing: border-box;
+  border: none !important; /* FORCE REMOVE ALL BORDERS */
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Premium SaaS background - ensures glassmorphism visibility */
+  background-color: #F8FAFC !important;
+}
+
+/* Remove default button styles */
+button {
+  border: none !important;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Custom focus styles for better accessibility */
+button:focus-visible {
+  outline: 2px solid #F36F21;
+  outline-offset: 2px;
+}
+
+/* Platform-aware theming */
+:root {
+  --platform-primary: #F36F21; /* Default Vyndo Orange */
+  --platform-accent: #2D6A4F; /* Default Millet Green */
+  --vyndo-primary: #F36F21;
+  --vyndo-accent: #2D6A4F;
+  --chart-primary: #F36F21;
+  --chart-accent: #2D6A4F;
+}
+
+/* Amazon platform theming */
+body.platform-amazon {
+  --platform-primary: #146EB4;
+  --platform-accent: #FF9900;
+  --vyndo-primary: #146EB4;
+  --vyndo-accent: #FF9900;
+  --chart-primary: #146EB4;
+  --chart-accent: #FF9900;
+}
+
+/* Blinkit platform theming */
+body.platform-blinkit {
+  --platform-primary: #F36F21;
+  --platform-accent: #2D6A4F;
+  --vyndo-primary: #F36F21;
+  --vyndo-accent: #2D6A4F;
+  --chart-primary: #F36F21;
+  --chart-accent: #2D6A4F;
+}
+
+/* Unified platform theming */
+body.platform-all {
+  --platform-primary: #6B7280;
+  --platform-accent: #4F46E5;
+  --vyndo-primary: #6B7280;
+  --vyndo-accent: #4F46E5;
+  --chart-primary: #6B7280;
+  --chart-accent: #4F46E5;
+}
+
+/* Chart Layout Spacing Utilities */
+.chart-section-spacing {
+  margin-top: 3rem;
+  margin-bottom: 3rem;
+}
+
+.chart-container-spacing {
+  padding-bottom: 2rem;
+}
+
+/* Ensure no text overlap in chart areas */
+.chart-text-spacing {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: rgba(248, 250, 252, 0.8);
+  border-radius: 0.75rem;
+}
+
+/* Main content area clearance */
+.main-content-clearance {
+  padding-top: 5rem;
+  padding-left: 1.5rem;
+}
+
+/* Chart instruction text styling */
+.chart-instruction {
+  margin-top: 1rem;
+  margin-bottom: 2rem;
+  padding: 0.75rem 1rem;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+/* Glassmorphism card styles */
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-card-dark {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Interactive card animations */
+.interactive-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Shadow utilities */
+.shadow-elevated {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.shadow-elevated-lg {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.elevated-lg {
+  transform: translateY(-2px);
+}
+
+/* Smooth transitions */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -1,0 +1,18 @@
+1. Visual Identity & Concept
+The Vyndo dashboard should reflect the brand's core values: Trust, Health, and Modern Tradition. The UI should feel like a premium SaaS product but maintain the "earthy" and "energetic" feel of a healthy millet-snack brand.
+2. Color Palette
+Use these specific HEX codes for Tailwind CSS configuration:
+Primary (Vyndo Orange): #F36F21 (Action buttons, brand accents, and primary highlights)
+Success (Millet Green): #2D6A4F (Adequate stock levels, positive growth indicators)
+Warning (Harvest Gold): #FFB703 (Understock/Low stock alerts)
+Danger (Alert Red): #D90429 (Out of stock, critical errors)
+Neutral Background: #F9FAFB (Subtle gray for the main workspace)
+Surface/Card Color: #FFFFFF (White cards with subtle shadow-sm)
+Typography: #1A1A1A (Near-black for readability)
+3. Typography
+Headings: Sans-serif (Inter or Outfit), Semibold, high-contrast.
+Data Points: Tabular numbers (Monospace) are preferred for inventory tables to ensure vertical alignment.
+4. Design Language
+Corners: Use rounded-xl (12px) for cards and buttons to keep the feel approachable.
+Borders: Minimal. Use border-slate-100 for subtle separation.
+Icons: Use the Lucide-react library with a consistent stroke width of 2px.
