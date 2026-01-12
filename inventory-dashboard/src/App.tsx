@@ -9,7 +9,7 @@ import { PLATFORM } from './types';
 import './App.css';
 
 function App() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management'>('data-management');
+  const [activeView, setActiveView] = useState<'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis'>('data-management');
   const [activePlatform, setActivePlatform] = useState<Platform>(PLATFORM.BLINKIT);
 
   // Initialize theme and preferences on app startup
@@ -30,7 +30,7 @@ function App() {
     setActiveView('data-management');
   }, []);
 
-  const handleViewChange = (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management') => {
+  const handleViewChange = (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => {
     setActiveView(view);
   };
 

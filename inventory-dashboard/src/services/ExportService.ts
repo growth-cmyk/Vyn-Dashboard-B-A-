@@ -539,6 +539,236 @@ export class ExportService {
   }
 
   /**
+   * Export marketing performance data with strategic recommendations
+   * @param campaignData Campaign performance data
+   * @param syncData Ad-inventory sync recommendations
+   * @param kpis Marketing KPIs
+   * @param options Export options
+   * @returns CSV content as string
+   */
+  static exportMarketingPerformanceToCSV(
+    campaignData: any[],
+    syncData: any[],
+    _kpis: any,
+    options: Partial<ExportOptions> = {}
+  ): string {
+    // Marketing Performance Report Headers
+    const performanceHeaders = [
+      'Campaign Name',
+      'Campaign Type', 
+      'SKU',
+      'Date',
+      'Budget Consumed',
+      'Direct Sales',
+      'Indirect Sales',
+      'Total Revenue',
+      'RoAS',
+      'Impressions',
+      'Unique Clicks',
+      'CTR (%)',
+      'Add to Cart',
+      'Quantities Sold',
+      'Conversion Rate (%)',
+      'Strategic Action',
+      'Inventory Status',
+      'Days of Cover',
+      'Recommended Action'
+    ];
+
+    // Transform campaign data with strategic insights
+    const performanceRows = campaignData.map(campaign => {
+      const totalRevenue = campaign.directSales + (campaign.indirectSales || 0);
+      const roas = campaign.budgetConsumed > 0 ? totalRevenue / campaign.budgetConsumed : 0;
+      const ctr = campaign.impressions > 0 ? ((campaign.uniqueClicks || 0) / campaign.impressions) * 100 : 0;
+      const conversionRate = (campaign.uniqueClicks || 0) > 0 ? 
+        ((campaign.quantitiesSold || 0) / (campaign.uniqueClicks || 0)) * 100 : 0;
+
+      // Find matching sync data for strategic insights
+      const syncItem = syncData.find(item => 
+        item.campaignName === campaign.campaignName || 
+        item.sku === campaign.sku
+      );
+
+      return [
+        campaign.campaignName,
+        campaign.campaignType,
+        campaign.sku || 'N/A',
+        campaign.date.toISOString().split('T')[0],
+        campaign.budgetConsumed,
+        campaign.directSales,
+        campaign.indirectSales || 0,
+        totalRevenue,
+        roas.toFixed(2),
+        campaign.impressions,
+        campaign.uniqueClicks || 0,
+        ctr.toFixed(2),
+        campaign.addToCart || 0,
+        campaign.quantitiesSold || 0,
+        conversionRate.toFixed(2),
+        syncItem?.strategicAction || 'Monitor',
+        syncItem?.inventoryStatus || 'Unknown',
+        syncItem?.daysOfCover ? Math.round(syncItem.daysOfCover) : 'N/A',
+        syncItem?.recommendedAction || 'Review performance'
+      ];
+    });
+
+    const csvData = options.includeHeaders !== false ? [performanceHeaders, ...performanceRows] : performanceRows;
+    
+    return Papa.unparse(csvData, {
+      header: false,
+      skipEmptyLines: true
+    });
+  }
+
+  /**
+   * Export strategic recommendations summary
+   * @param syncData Ad-inventory sync data
+   * @param kpis Marketing KPIs
+   * @param options Export options
+   * @returns CSV content as string
+   */
+  static exportStrategicRecommendationsToCSV(
+    syncData: any[],
+    _kpis: any,
+    options: Partial<ExportOptions> = {}
+  ): string {
+    const headers = [
+      'Product Name',
+      'SKU',
+      'Ad Spend (₹)',
+      'Inventory Status',
+      'Days of Cover',
+      'Strategic Action',
+      'Urgency Level',
+      'Recommended Action',
+      'Business Impact'
+    ];
+
+    const rows = syncData.map(item => {
+      let businessImpact = 'Monitor performance';
+      
+      if (item.strategicAction.includes('SCALE ADS')) {
+        businessImpact = item.daysOfCover > 90 ? 
+          'High ROI opportunity - Flash Promo potential' : 
+          'Increase ad spend to move excess inventory';
+      } else if (item.strategicAction.includes('PAUSE ADS')) {
+        businessImpact = item.daysOfCover < 18 ? 
+          'Critical - Risk of stockout, immediate restock needed' : 
+          'Reduce ad spend to prevent stockout risk';
+      } else if (item.strategicAction.includes('OPTIMIZE')) {
+        businessImpact = 'Fine-tune targeting and budget allocation';
+      }
+
+      return [
+        item.campaignName,
+        item.sku,
+        item.adSpend,
+        item.inventoryStatus,
+        item.daysOfCover ? Math.round(item.daysOfCover) : 'N/A',
+        item.strategicAction,
+        item.urgencyLevel,
+        item.recommendedAction,
+        businessImpact
+      ];
+    });
+
+    const csvData = options.includeHeaders !== false ? [headers, ...rows] : rows;
+    
+    return Papa.unparse(csvData, {
+      header: false,
+      skipEmptyLines: true
+    });
+  }
+
+  /**
+   * Generate comprehensive marketing report with multiple sheets
+   * @param campaignData Campaign data
+   * @param syncData Strategic recommendations
+   * @param kpis Marketing KPIs
+   * @param format Export format
+   * @returns Report content
+   */
+  static generateMarketingReport(
+    campaignData: any[],
+    syncData: any[],
+    kpis: any,
+    format: ExportFormat = 'xlsx'
+  ): string | ArrayBuffer {
+    if (format === 'xlsx') {
+      const workbook = XLSX.utils.book_new();
+
+      // Executive Summary Sheet
+      const summaryData = [
+        ['Vyndo Marketing Performance Report'],
+        ['Generated on:', new Date().toISOString().split('T')[0]],
+        [''],
+        ['Executive Summary'],
+        ['Total Ad Spend:', `₹${kpis.totalAdSpend?.toLocaleString() || 0}`],
+        ['Total Revenue:', `₹${kpis.totalAdSales?.toLocaleString() || 0}`],
+        ['Average RoAS:', `${kpis.averageRoAS?.toFixed(2) || 0}x`],
+        ['New Customers:', kpis.newCustomerAcquisition?.toLocaleString() || 0],
+        ['Campaign Count:', kpis.campaignCount || 0],
+        ['Overall CTR:', `${kpis.overallCTR?.toFixed(2) || 0}%`],
+        [''],
+        ['Strategic Insights'],
+        ['High Priority Actions:', syncData.filter(item => item.urgencyLevel === 'critical' || item.urgencyLevel === 'high').length],
+        ['Scale Opportunities:', syncData.filter(item => item.strategicAction.includes('SCALE ADS')).length],
+        ['Pause Recommendations:', syncData.filter(item => item.strategicAction.includes('PAUSE ADS')).length],
+        [''],
+        ['Key Recommendations'],
+        ['• Review high-spend campaigns with low inventory'],
+        ['• Scale successful campaigns with excess stock (>90 days)'],
+        ['• Pause campaigns for products below 18-day reorder point'],
+        ['• Optimize targeting for campaigns with healthy inventory levels']
+      ];
+      
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Executive Summary');
+
+      // Campaign Performance Sheet
+      if (campaignData.length > 0) {
+        const performanceCSV = this.exportMarketingPerformanceToCSV(campaignData, syncData, kpis);
+        const performanceData = Papa.parse(performanceCSV, { header: true }).data;
+        const performanceSheet = XLSX.utils.json_to_sheet(performanceData);
+        XLSX.utils.book_append_sheet(workbook, performanceSheet, 'Campaign Performance');
+      }
+
+      // Strategic Recommendations Sheet
+      if (syncData.length > 0) {
+        const recommendationsCSV = this.exportStrategicRecommendationsToCSV(syncData, kpis);
+        const recommendationsData = Papa.parse(recommendationsCSV, { header: true }).data;
+        const recommendationsSheet = XLSX.utils.json_to_sheet(recommendationsData);
+        XLSX.utils.book_append_sheet(workbook, recommendationsSheet, 'Strategic Recommendations');
+      }
+
+      return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    } else {
+      // CSV format - combine all data
+      const performanceCSV = this.exportMarketingPerformanceToCSV(campaignData, syncData, kpis);
+      const recommendationsCSV = this.exportStrategicRecommendationsToCSV(syncData, kpis);
+
+      return [
+        '=== VYNDO MARKETING PERFORMANCE REPORT ===',
+        `Generated on: ${new Date().toISOString().split('T')[0]}`,
+        '',
+        '=== EXECUTIVE SUMMARY ===',
+        `Total Ad Spend: ₹${kpis.totalAdSpend?.toLocaleString() || 0}`,
+        `Total Revenue: ₹${kpis.totalAdSales?.toLocaleString() || 0}`,
+        `Average RoAS: ${kpis.averageRoAS?.toFixed(2) || 0}x`,
+        `New Customers: ${kpis.newCustomerAcquisition?.toLocaleString() || 0}`,
+        `Campaign Count: ${kpis.campaignCount || 0}`,
+        `Overall CTR: ${kpis.overallCTR?.toFixed(2) || 0}%`,
+        '',
+        '=== CAMPAIGN PERFORMANCE DATA ===',
+        performanceCSV,
+        '',
+        '=== STRATEGIC RECOMMENDATIONS ===',
+        recommendationsCSV
+      ].join('\n');
+    }
+  }
+
+  /**
    * Generic CSV export for any data array
    * 
    * @param data - Array of objects to export

@@ -4,6 +4,7 @@ export { AnalyticsService } from './AnalyticsService';
 export { FilterService } from './FilterService';
 export { ExportService } from './ExportService';
 export { HistoryService } from './HistoryService';
+export { MarketingService } from './MarketingService';
 export { ThemeService } from './ThemeService';
 export { UserPreferenceService } from './UserPreferenceService';
 export type { UITheme, ThemePreferences } from './ThemeService';

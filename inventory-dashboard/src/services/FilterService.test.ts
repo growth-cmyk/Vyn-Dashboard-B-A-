@@ -300,4 +300,84 @@ describe('FilterService', () => {
       expect(result).toBe('No filters applied');
     });
   });
+
+  describe('applyCampaignFilters', () => {
+    let mockCampaigns: any[];
+
+    beforeEach(() => {
+      const now = new Date();
+      mockCampaigns = [
+        {
+          date: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
+          campaignName: 'iPhone 14 Promotion',
+          campaignType: 'Product Recommendation',
+          impressions: 10000,
+          ctr: 2.5,
+          budgetConsumed: 5000,
+          directSales: 12000,
+          totalRoAS: 2.4
+        },
+        {
+          date: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
+          campaignName: 'Samsung Galaxy Launch',
+          campaignType: 'Product Listing',
+          impressions: 8000,
+          ctr: 3.0,
+          budgetConsumed: 4000,
+          directSales: 10000,
+          totalRoAS: 2.5
+        },
+        {
+          date: new Date(now.getTime() - 25 * 24 * 60 * 60 * 1000), // 25 days ago
+          campaignName: 'Holiday Sale',
+          campaignType: 'Brand Booster',
+          impressions: 15000,
+          ctr: 1.8,
+          budgetConsumed: 7000,
+          directSales: 14000,
+          totalRoAS: 2.0
+        }
+      ];
+    });
+
+    it('should filter campaigns by search term', () => {
+      const criteria: FilterCriteria = {
+        searchTerm: 'iPhone'
+      };
+
+      const result = FilterService.applyCampaignFilters(mockCampaigns, criteria);
+      expect(result).toHaveLength(1);
+      expect(result[0].campaignName).toBe('iPhone 14 Promotion');
+    });
+
+    it('should filter campaigns by time period', () => {
+      const criteria: FilterCriteria = {
+        timePeriod: 'last-15-days'
+      };
+
+      const result = FilterService.applyCampaignFilters(mockCampaigns, criteria);
+      expect(result).toHaveLength(2); // Should exclude the 25-day-old campaign
+      expect(result.every(c => {
+        const daysDiff = (Date.now() - new Date(c.date).getTime()) / (1000 * 60 * 60 * 24);
+        return daysDiff <= 15;
+      })).toBe(true);
+    });
+
+    it('should return all campaigns when no criteria specified', () => {
+      const result = FilterService.applyCampaignFilters(mockCampaigns, {});
+      expect(result).toHaveLength(3);
+      expect(result).toEqual(mockCampaigns);
+    });
+
+    it('should apply multiple filters correctly', () => {
+      const criteria: FilterCriteria = {
+        searchTerm: 'Samsung',
+        timePeriod: 'last-30-days'
+      };
+
+      const result = FilterService.applyCampaignFilters(mockCampaigns, criteria);
+      expect(result).toHaveLength(1);
+      expect(result[0].campaignName).toBe('Samsung Galaxy Launch');
+    });
+  });
 });

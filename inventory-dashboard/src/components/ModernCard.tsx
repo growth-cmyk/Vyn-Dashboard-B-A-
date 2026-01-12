@@ -39,28 +39,26 @@ export const ModernCard = forwardRef<HTMLDivElement, ModernCardProps>(
     const baseStyles = cn(
       'rounded-2xl border transition-smooth', // Changed to rounded-2xl (16px)
       'focus-within:ring-2 focus-within:ring-vyndo-primary-500 focus-within:ring-offset-2',
-      // Size variants
+      // Size variants - ENFORCED p-8 for floating aesthetic
       {
-        'p-3': size === 'sm',
-        'p-4': size === 'md', 
-        'p-6': size === 'lg',
-        'p-8': size === 'xl',
+        'p-6': size === 'sm',
+        'p-8': size === 'md' || size === 'lg' || size === 'xl',
       }
     );
 
-    // Variant-specific styles - SUBTLE BORDERS, NO HARSH BLACK
+    // Variant-specific styles - FLOATING AESTHETIC WITH bg-white/90 AND COLORED BORDERS
     const variantStyles = cn({
-      // Glass variant - Real glassmorphism with subtle borders
-      'glass-card border-slate-200/60 dark:glass-card-dark dark:border-slate-600/40': variant === 'glass',
+      // Glass variant - Real glassmorphism with subtle borders and colored top border
+      'bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border-slate-200/60 border-t-2 border-t-[#ef5326] dark:glass-card-dark dark:border-slate-600/40': variant === 'glass',
       
-      // Elevated variant - Glassmorphism with elevation
-      'glass-card border-slate-200/60 shadow-elevated dark:glass-card-dark dark:border-slate-600/40 dark:shadow-elevated hover:elevated-lg hover:shadow-elevated-lg': variant === 'elevated',
+      // Elevated variant - Glassmorphism with elevation and colored top border
+      'bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border-slate-200/60 border-t-2 border-t-[#ef5326] hover:shadow-[0_25px_60px_rgba(0,0,0,0.08)] dark:glass-card-dark dark:border-slate-600/40': variant === 'elevated',
       
-      // Flat variant - Minimal glassmorphism
-      'glass-card border-slate-200/40 shadow-sm dark:glass-card-dark dark:border-slate-600/30': variant === 'flat',
+      // Flat variant - Minimal glassmorphism with colored top border
+      'bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border-slate-200/40 border-t-2 border-t-[#ef5326] dark:glass-card-dark dark:border-slate-600/30': variant === 'flat',
       
-      // Interactive variant - Hover animations with glassmorphism
-      'interactive-card glass-card border-slate-200/60 shadow-sm dark:glass-card-dark dark:border-slate-600/40 hover:-translate-y-1 hover:scale-[1.01] cursor-pointer active:translate-y-0 active:scale-100': variant === 'interactive',
+      // Interactive variant - Hover animations with glassmorphism and colored top border
+      'bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border-slate-200/60 border-t-2 border-t-[#ef5326] hover:-translate-y-1 hover:scale-[1.01] cursor-pointer active:translate-y-0 active:scale-100 dark:glass-card-dark dark:border-slate-600/40': variant === 'interactive',
     });
 
     // Gradient overlay styles

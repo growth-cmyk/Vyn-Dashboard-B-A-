@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { Download, FileText, FileSpreadsheet, Loader2, CheckCircle } from 'lucide-react';
-import type { InventoryItem, SalesRecord, FilterCriteria } from '../types';
+import { Download, FileText, FileSpreadsheet, Loader2, CheckCircle, Megaphone } from 'lucide-react';
+import type { InventoryItem, SalesRecord, FilterCriteria, AdCampaignRecord, MarketingKPIs, AdInventorySyncItem } from '../types';
 import { ExportService, type ExportFormat, type ExportOptions } from '../services/ExportService';
 
 interface ExportControlsProps {
   inventoryData: InventoryItem[];
   salesData: SalesRecord[];
   filters: FilterCriteria;
+  // Marketing data props (optional)
+  campaignData?: AdCampaignRecord[];
+  marketingKPIs?: MarketingKPIs;
+  syncData?: AdInventorySyncItem[];
   className?: string;
 }
 
@@ -23,6 +27,9 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
   inventoryData,
   salesData,
   filters,
+  campaignData = [],
+  marketingKPIs,
+  syncData = [],
   className = ''
 }) => {
   const [state, setState] = useState<ExportState>({
@@ -43,7 +50,7 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
   });
 
   // Handle export execution
-  const handleExport = async (type: 'inventory' | 'sales' | 'analytics' | 'report', format: ExportFormat) => {
+  const handleExport = async (type: 'inventory' | 'sales' | 'analytics' | 'report' | 'marketing' | 'marketing-recommendations', format: ExportFormat) => {
     setState(prev => ({ ...prev, isExporting: true, error: null }));
 
     try {
@@ -53,22 +60,38 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
       switch (type) {
         case 'inventory':
           content = ExportService.exportInventoryToCSV(inventoryData, { ...exportOptions, format });
-          baseFilename = 'inventory_data';
+          baseFilename = 'vyndo_inventory_data';
           break;
 
         case 'sales':
           content = ExportService.exportSalesToCSV(salesData, { ...exportOptions, format });
-          baseFilename = 'sales_data';
+          baseFilename = 'vyndo_sales_data';
           break;
 
         case 'analytics':
           content = ExportService.exportStockAnalysisToCSV(inventoryData, { ...exportOptions, format });
-          baseFilename = 'stock_analysis';
+          baseFilename = 'vyndo_stock_analysis';
           break;
 
         case 'report':
           content = ExportService.generateReport(inventoryData, salesData, filters, format);
-          baseFilename = 'inventory_sales_report';
+          baseFilename = 'vyndo_inventory_sales_report';
+          break;
+
+        case 'marketing':
+          if (campaignData.length === 0) {
+            throw new Error('No marketing campaign data available for export');
+          }
+          content = ExportService.generateMarketingReport(campaignData, syncData, marketingKPIs, format);
+          baseFilename = 'vyndo_marketing_performance_report';
+          break;
+
+        case 'marketing-recommendations':
+          if (syncData.length === 0) {
+            throw new Error('No strategic recommendations available for export');
+          }
+          content = ExportService.exportStrategicRecommendationsToCSV(syncData, marketingKPIs, { ...exportOptions, format });
+          baseFilename = 'vyndo_strategic_recommendations';
           break;
 
         default:
@@ -107,6 +130,7 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
   };
 
   const hasData = inventoryData.length > 0 || salesData.length > 0;
+  const hasMarketingData = campaignData.length > 0;
 
   return (
     <div className={`bg-white rounded-lg shadow-sm border p-6 ${className}`}>
@@ -130,13 +154,13 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
         </div>
       )}
 
-      {!hasData ? (
+      {!hasData && !hasMarketingData ? (
         <div className="text-center py-8 text-gray-500">
           <FileText className="mx-auto h-12 w-12 text-gray-300 mb-2" />
           <p className="text-vyndo-text font-medium">No data available for export</p>
-          <p className="text-sm mb-4">Upload inventory and sales data to enable exports</p>
+          <p className="text-sm mb-4">Upload inventory, sales, or marketing data to enable exports</p>
           <button className="bg-vyndo-orange text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors">
-            Upload Data to Start
+            Upload Data to Begin
           </button>
         </div>
       ) : (
@@ -240,7 +264,7 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
           {/* Quick Export Buttons */}
           <div>
             <h4 className="text-sm font-medium text-gray-700 mb-3">Quick Exports</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {/* Inventory Export */}
               <button
                 onClick={() => handleExport('inventory', exportOptions.format)}
@@ -252,7 +276,7 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
                 ) : (
                   <FileText className="h-4 w-4 mr-2" />
                 )}
-                Inventory
+                Inventory ({inventoryData.length})
               </button>
 
               {/* Sales Export */}
@@ -266,7 +290,7 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
                 ) : (
                   <FileText className="h-4 w-4 mr-2" />
                 )}
-                Sales
+                Sales ({salesData.length})
               </button>
 
               {/* Analytics Export */}
@@ -280,22 +304,83 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
                 ) : (
                   <FileText className="h-4 w-4 mr-2" />
                 )}
-                Analytics
+                Stock Analysis
               </button>
+            </div>
 
-              {/* Complete Report Export */}
-              <button
-                onClick={() => handleExport('report', exportOptions.format)}
-                disabled={state.isExporting}
-                className="flex items-center justify-center px-4 py-2 bg-vyndo-orange text-white rounded-md shadow-sm text-sm font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {state.isExporting ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <FileSpreadsheet className="h-4 w-4 mr-2" />
-                )}
-                Full Report
-              </button>
+            {/* Marketing Export Section */}
+            {hasMarketingData && (
+              <>
+                <h4 className="text-sm font-medium text-gray-700 mb-3 mt-6 flex items-center">
+                  <Megaphone className="h-4 w-4 mr-2 text-vyndo-orange" />
+                  Marketing Performance Reports
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Marketing Performance Export */}
+                  <button
+                    onClick={() => handleExport('marketing', exportOptions.format)}
+                    disabled={state.isExporting}
+                    className="flex items-center justify-center px-4 py-2 bg-gradient-to-r from-vyndo-orange to-red-500 text-white rounded-md shadow-sm text-sm font-medium hover:from-red-500 hover:to-vyndo-orange disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+                  >
+                    {state.isExporting ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    )}
+                    Marketing Performance ({campaignData.length} campaigns)
+                  </button>
+
+                  {/* Strategic Recommendations Export */}
+                  <button
+                    onClick={() => handleExport('marketing-recommendations', exportOptions.format)}
+                    disabled={state.isExporting || syncData.length === 0}
+                    className="flex items-center justify-center px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-md shadow-sm text-sm font-medium hover:from-emerald-600 hover:to-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+                  >
+                    {state.isExporting ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    )}
+                    Strategic Recommendations ({syncData.length} items)
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Complete Reports Section */}
+            <h4 className="text-sm font-medium text-gray-700 mb-3 mt-6">Complete Reports</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Inventory & Sales Report */}
+              {hasData && (
+                <button
+                  onClick={() => handleExport('report', exportOptions.format)}
+                  disabled={state.isExporting}
+                  className="flex items-center justify-center px-4 py-2 bg-vyndo-orange text-white rounded-md shadow-sm text-sm font-medium hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {state.isExporting ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  )}
+                  Inventory & Sales Report
+                </button>
+              )}
+
+              {/* Marketing Complete Report */}
+              {hasMarketingData && (
+                <button
+                  onClick={() => handleExport('marketing', exportOptions.format)}
+                  disabled={state.isExporting}
+                  className="flex items-center justify-center px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-md shadow-sm text-sm font-medium hover:from-indigo-600 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
+                >
+                  {state.isExporting ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  )}
+                  Complete Marketing Report
+                </button>
+              )}
             </div>
           </div>
 
@@ -305,6 +390,12 @@ export const ExportControls: React.FC<ExportControlsProps> = ({
             <div className="text-sm text-gray-600 space-y-1">
               <p>• {inventoryData.length} inventory items</p>
               <p>• {salesData.length} sales records</p>
+              {hasMarketingData && (
+                <>
+                  <p>• {campaignData.length} marketing campaigns</p>
+                  <p>• {syncData.length} strategic recommendations</p>
+                </>
+              )}
               <p>• Applied filters: {Object.keys(filters).length > 0 ? 'Yes' : 'None'}</p>
               {Object.keys(filters).length > 0 && (
                 <p className="text-xs text-gray-500 mt-1">

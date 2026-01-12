@@ -2,7 +2,8 @@ import type {
   InventoryItem,
   SalesRecord,
   TimePeriod,
-  FilterCriteria
+  FilterCriteria,
+  AdCampaignRecord
 } from '../types';
 import { TIME_PERIOD } from '../types';
 
@@ -183,11 +184,60 @@ export class FilterService {
   }
 
   /**
-   * Apply multiple filter criteria to sales data
-   * @param sales Array of sales records
+   * Apply multiple filter criteria to campaign data
+   * @param campaigns Array of campaign records
    * @param criteria Filter criteria to apply
-   * @returns Filtered sales records matching all specified criteria
+   * @returns Filtered campaign records matching all specified criteria
    */
+  static applyCampaignFilters(campaigns: AdCampaignRecord[], criteria: FilterCriteria): AdCampaignRecord[] {
+    let filtered = campaigns;
+
+    // Filter by search term (campaign name)
+    if (criteria.searchTerm) {
+      const normalizedSearchTerm = criteria.searchTerm.toLowerCase().trim();
+      filtered = filtered.filter(campaign => 
+        campaign.campaignName.toLowerCase().includes(normalizedSearchTerm)
+      );
+    }
+
+    // Filter by time period
+    if (criteria.timePeriod) {
+      const now = new Date();
+      const startDate = this.getTimePeriodStartDate(criteria.timePeriod, now);
+      
+      filtered = filtered.filter(campaign => {
+        const campaignDate = new Date(campaign.date);
+        return campaignDate >= startDate && campaignDate <= now;
+      });
+    }
+
+    // Filter by custom date range
+    if (criteria.startDate && criteria.endDate) {
+      filtered = filtered.filter(campaign => {
+        const campaignDate = new Date(campaign.date);
+        return campaignDate >= criteria.startDate! && campaignDate <= criteria.endDate!;
+      });
+    }
+
+    return filtered;
+  }
+
+  /**
+   * Get unique campaign types from campaign data
+   * @param campaigns Array of campaign records
+   * @returns Array of unique campaign types
+   */
+  static getUniqueCampaignTypes(campaigns: AdCampaignRecord[]): string[] {
+    const types = new Set<string>();
+    
+    campaigns.forEach(campaign => {
+      if (campaign.campaignType) {
+        types.add(campaign.campaignType);
+      }
+    });
+
+    return Array.from(types).sort();
+  }
   static applySalesFilters(sales: SalesRecord[], criteria: FilterCriteria): SalesRecord[] {
     let filtered = sales;
 
@@ -289,7 +339,7 @@ export class FilterService {
    * @param referenceDate Reference date (usually current date)
    * @returns Start date for the time period
    */
-  private static getTimePeriodStartDate(period: TimePeriod, referenceDate: Date): Date {
+  static getTimePeriodStartDate(period: TimePeriod, referenceDate: Date): Date {
     const date = new Date(referenceDate);
     
     switch (period) {

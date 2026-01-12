@@ -84,7 +84,7 @@ This implementation plan transforms the inventory history system from localStora
 
 - [x] 3.2 Enhance chart components for file-based trend data
   - Update Charts.tsx to use file-based dates for x-axis when available
-  - Modify trend chart rendering to show immediate data points after upload
+  - Modify trend chart rendering to s how immediate data points after upload
   - Implement chronological date sorting for proper line progression
   - _Requirements: 2.3, 4.3_
 

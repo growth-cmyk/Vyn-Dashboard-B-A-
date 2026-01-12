@@ -487,8 +487,209 @@ export interface FilterCriteria {
 }
 
 /**
- * Validation schema for sales records
+ * Represents an advertising campaign record from Excel data
  */
+export interface AdCampaignRecord {
+  date: Date;
+  campaignName: string;
+  campaignType: CampaignType;
+  impressions: number;
+  ctr: number; // Click-through rate as percentage (0-100)
+  budgetConsumed: number;
+  directSales: number;
+  indirectSales?: number; // Optional, may not be in all tabs
+  totalRoAS: number;
+  // Platform support - defaults to 'Blinkit' for backward compatibility
+  platform?: Platform;
+  // Derived fields
+  sku?: string; // Extracted from campaign data if available
+  newUsersAcquired?: number; // From listing/recommendation tabs
+  uniqueClicks?: number; // For funnel analysis
+  addToCart?: number; // For funnel analysis (Direct ATC)
+  indirectAddToCart?: number; // For funnel analysis (Indirect ATC)
+  quantitiesSold?: number; // For funnel analysis (Direct Quantities)
+  indirectQuantitiesSold?: number; // For funnel analysis (Indirect Quantities)
+}
+
+/**
+ * Campaign type classification based on Excel tab source
+ */
+export type CampaignType = 'Product Recommendation' | 'Product Listing' | 'Brand Booster';
+
+/**
+ * Campaign type constants for type safety
+ */
+export const CAMPAIGN_TYPE = {
+  PRODUCT_RECOMMENDATION: 'Product Recommendation' as const,
+  PRODUCT_LISTING: 'Product Listing' as const,
+  BRAND_BOOSTER: 'Brand Booster' as const
+} as const;
+
+/**
+ * Marketing KPI aggregation for dashboard display
+ */
+export interface MarketingKPIs {
+  totalAdSpend: number;
+  totalAdSales: number;
+  averageRoAS: number;
+  newCustomerAcquisition: number;
+  campaignCount: number;
+  topPerformingCampaign: string;
+  totalImpressions: number;
+  totalClicks: number;
+  overallCTR: number;
+}
+
+/**
+ * Ad-Inventory synchronization item for strategic analysis
+ */
+export interface AdInventorySyncItem {
+  sku: string;
+  campaignName: string;
+  adSpend: number;
+  inventoryStatus: StockStatus;
+  strategicAction: StrategicAction;
+  daysOfCover?: number;
+  recommendedAction: string;
+  urgencyLevel: 'low' | 'medium' | 'high' | 'critical';
+}
+
+/**
+ * Strategic action recommendations for ad-inventory correlation
+ */
+export type StrategicAction = 
+  | 'SCALE ADS'
+  | 'PAUSE ADS' 
+  | 'OPTIMIZE'
+  | 'MONITOR'
+  | 'High ROI Opportunity: Scale Ads' 
+  | 'Pause Ads: Low Inventory Risk' 
+  | 'Monitor' 
+  | 'Optimize Campaign';
+
+/**
+ * Strategic action constants for type safety
+ * ENHANCED: Clear action labels for Elite SaaS interface
+ */
+export const STRATEGIC_ACTION = {
+  SCALE_ADS: 'SCALE ADS' as const,
+  PAUSE_ADS: 'PAUSE ADS' as const,
+  MONITOR: 'MONITOR' as const,
+  OPTIMIZE: 'OPTIMIZE' as const
+} as const;
+
+/**
+ * Campaign performance trend data for charts
+ */
+export interface CampaignTrendData {
+  date: string; // ISO date string
+  adSpend: number;
+  adRevenue: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  roas: number;
+}
+
+/**
+ * Funnel analysis data for conversion tracking
+ */
+export interface FunnelAnalysisData {
+  stage: 'Impressions' | 'Unique Clicks' | 'Add to Cart' | 'Quantities Sold';
+  value: number;
+  conversionRate?: number; // Percentage to next stage
+}
+
+/**
+ * CSV column mapping for campaign data (flexible to handle different Excel formats)
+ */
+export interface CampaignCSVSchema {
+  [key: string]: string | number | Date; // Flexible to handle various column names
+}
+
+/**
+ * Excel tab configuration for campaign data processing
+ */
+export interface ExcelTabConfig {
+  tabName: string;
+  campaignType: CampaignType;
+  requiredColumns: string[];
+  optionalColumns: string[];
+  defaultValues: Record<string, any>;
+}
+
+/**
+ * Marketing filter criteria extending base FilterCriteria
+ */
+export interface MarketingFilterCriteria extends FilterCriteria {
+  campaignTypes?: CampaignType[];
+  minAdSpend?: number;
+  maxAdSpend?: number;
+  minRoAS?: number;
+  maxRoAS?: number;
+  strategicActions?: StrategicAction[];
+}
+
+/**
+ * Excel tab configurations for campaign data processing
+ * Updated to match exact Excel headers and handle missing columns gracefully
+ */
+export const EXCEL_TAB_CONFIGS: Record<string, ExcelTabConfig> = {
+  'PRODUCT_RECOMMENDATION': {
+    tabName: 'PRODUCT_RECOMMENDATION',
+    campaignType: CAMPAIGN_TYPE.PRODUCT_RECOMMENDATION,
+    requiredColumns: ['Date', 'Campaign Name', 'Estimated Budget Consumed', 'Direct Sales'],
+    optionalColumns: ['Impressions', 'CTR', 'Indirect Sales', 'Total RoAS', 'New Users Acquired', 'Unique Clicks', 'Direct ATC', 'Indirect ATC', 'Quantities Sold', 'Direct Quantities Sold', 'Indirect Quantities Sold'],
+    defaultValues: {
+      impressions: 0,
+      ctr: 0,
+      indirectSales: 0,
+      totalRoAS: 0,
+      newUsersAcquired: 0,
+      uniqueClicks: 0,
+      addToCart: 0,
+      indirectAddToCart: 0,
+      quantitiesSold: 0,
+      indirectQuantitiesSold: 0
+    }
+  },
+  'PRODUCT_LISTING': {
+    tabName: 'PRODUCT_LISTING',
+    campaignType: CAMPAIGN_TYPE.PRODUCT_LISTING,
+    requiredColumns: ['Date', 'Campaign Name', 'Estimated Budget Consumed', 'Direct Sales'],
+    optionalColumns: ['Impressions', 'CTR', 'Indirect Sales', 'Total RoAS', 'New Users Acquired', 'Unique Clicks', 'Direct ATC', 'Indirect ATC', 'Quantities Sold', 'Direct Quantities Sold', 'Indirect Quantities Sold'],
+    defaultValues: {
+      impressions: 0,
+      ctr: 0,
+      indirectSales: 0,
+      totalRoAS: 0,
+      newUsersAcquired: 0,
+      uniqueClicks: 0,
+      addToCart: 0,
+      indirectAddToCart: 0,
+      quantitiesSold: 0,
+      indirectQuantitiesSold: 0
+    }
+  },
+  'BRAND_BOOSTER': {
+    tabName: 'BRAND_BOOSTER',
+    campaignType: CAMPAIGN_TYPE.BRAND_BOOSTER,
+    requiredColumns: ['Date', 'Campaign Name', 'Estimated Budget Consumed'],
+    optionalColumns: ['Impressions', 'CTR', 'Direct Sales', 'Indirect Sales', 'Total RoAS', 'Unique Clicks', 'Direct ATC', 'Indirect ATC', 'Quantities Sold', 'Direct Quantities Sold', 'Indirect Quantities Sold'],
+    defaultValues: {
+      impressions: 0,
+      ctr: 0,
+      directSales: 0,
+      indirectSales: 0,
+      totalRoAS: 0,
+      uniqueClicks: 0,
+      addToCart: 0,
+      indirectAddToCart: 0,
+      quantitiesSold: 0,
+      indirectQuantitiesSold: 0
+    }
+  }
+} as const;
 export interface SalesValidationSchema {
   orderId: {
     required: true;

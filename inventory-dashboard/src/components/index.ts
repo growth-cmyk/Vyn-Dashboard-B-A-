@@ -48,3 +48,9 @@ export { CapitalTreemap } from './CapitalTreemap';
 export { AdvancedSparkline, SparklineCard } from './AdvancedSparkline';
 export { EnhancedCharts } from './EnhancedCharts';
 export { TopSkuMovementChart } from './TopSkuMovementChart';
+
+// Marketing Analytics Components
+export { MarketingAnalysis } from './MarketingAnalysis';
+export { MarketingKPICards } from './MarketingKPICards';
+export { MarketingDashboard } from './MarketingDashboard';
+export { CampaignCharts } from './CampaignCharts';

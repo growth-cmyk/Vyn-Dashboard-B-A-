@@ -5,6 +5,7 @@ import {
   TrendingUp, 
   AlertCircle, 
   UploadCloud,
+  Megaphone,
   Menu,
   X
 } from 'lucide-react';
@@ -16,14 +17,14 @@ import { PLATFORM } from '../types';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management';
-  onViewChange: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management') => void;
+  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis';
+  onViewChange: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => void;
   activePlatform?: Platform;
   onPlatformChange?: (platform: Platform) => void;
 }
 
 interface NavItem {
-  id: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management';
+  id: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis';
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }
@@ -32,6 +33,7 @@ const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutGrid },
   { id: 'inventory', label: 'Inventory Health', icon: Package },
   { id: 'sales', label: 'Sales Performance', icon: TrendingUp },
+  { id: 'marketing-analysis', label: 'Marketing Analysis', icon: Megaphone },
   { id: 'action-center', label: 'Action Center', icon: AlertCircle },
   { id: 'data-management', label: 'Data Management', icon: UploadCloud },
 ];
@@ -59,7 +61,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   }, [activeView]);
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] dark:bg-slate-900 overflow-hidden transition-colors duration-300"> {/* Premium SaaS background */}
+    <div className="flex h-screen bg-[#f8fafc] dark:bg-slate-900 overflow-hidden transition-colors duration-300 gap-12"> {/* Added gap-12 between sidebar and main */}
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -73,7 +75,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         className={`
           fixed lg:static inset-y-0 left-0 z-50
           w-64 bg-white dark:bg-slate-950 border-r border-slate-200/60 dark:border-slate-700/60 
-          flex flex-col shadow-lg dark:shadow-2xl
+          flex flex-col shadow-lg dark:shadow-2xl flex-shrink-0
           transform transition-all duration-300 ease-in-out lg:transform-none
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
@@ -171,7 +173,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden"> {/* Added min-w-0 for proper flex behavior */}
         {/* Mobile Header */}
         <header className="lg:hidden h-16 bg-white dark:bg-slate-950 border-b border-slate-200/60 dark:border-slate-700/60 flex items-center px-4 flex-shrink-0 shadow-sm dark:shadow-slate-900/20 transition-colors duration-300">
           <button
@@ -191,8 +193,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
         </header>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#F8FAFC] dark:bg-slate-900 transition-colors duration-300 lg:pl-64"> {/* Fixed padding-left for desktop sidebar */}
-          <div className="p-6">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-[#f8fafc] dark:bg-slate-900 transition-colors duration-300"> {/* Removed lg:pl-64 */}
+          {/* Premium Container - Force Linear Look */}
+          <div className="max-w-[1600px] mx-auto w-full px-12 py-10">
             {children}
           </div>
         </main>

@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, Filter, Search, AlertCircle, Loader2, FileText, BarChart3 } from 'lucide-react';
-import type { InventoryItem, SalesRecord, FilterCriteria, Platform, CumulativeHistoryData } from '../types';
+import { Upload, Filter, Search, AlertCircle, Loader2, FileText, BarChart3, FileSpreadsheet } from 'lucide-react';
+import type { InventoryItem, SalesRecord, FilterCriteria, Platform, CumulativeHistoryData, AdCampaignRecord } from '../types';
 import { PLATFORM } from '../types';
 import { DataService, FilterService, HistoryService } from '../services';
 import { PlatformContextService } from '../services/PlatformContextService';
@@ -11,10 +11,12 @@ import { StockAnalysis } from './StockAnalysis';
 import { Charts } from './Charts';
 import { ExportControls } from './ExportControls';
 import { ReplenishmentPlanner } from './ReplenishmentPlanner';
+import { MarketingDashboard } from './MarketingDashboard';
 
 interface DashboardState {
   inventoryData: InventoryItem[];
   salesData: SalesRecord[];
+  campaignData: AdCampaignRecord[];
   isLoading: boolean;
   error: string | null;
   filters: FilterCriteria;
@@ -26,8 +28,8 @@ interface DashboardState {
 }
 
 interface DashboardContentProps {
-  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management';
-  onViewChange?: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management') => void;
+  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis';
+  onViewChange?: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => void;
   activePlatform?: Platform;
   onPlatformChange?: (platform: Platform) => void;
 }
@@ -61,6 +63,7 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
   const [state, setState] = useState<DashboardState>({
     inventoryData: [],
     salesData: [],
+    campaignData: [],
     isLoading: false,
     error: null,
     filters: {},
@@ -74,9 +77,11 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
   const [uploadProgress, setUploadProgress] = useState<{
     inventory: boolean;
     sales: boolean;
+    campaigns: boolean;
   }>({
     inventory: false,
-    sales: false
+    sales: false,
+    campaigns: false
   });
 
   // File upload handlers with platform detection
@@ -117,8 +122,6 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
         
         // Validate data quality
         const qualityCheck = DataService.validateDataQuality(cumulativeHistory);
-        
-        console.log(`Cumulative file processed: ${cumulativeHistory.totalDaysOfHistory} days of history imported`);
         
         setState(prev => ({ 
           ...prev, 
@@ -197,6 +200,43 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
     }
   }, []);
 
+  // Handle campaign Excel upload
+  const handleCampaignUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setUploadProgress(prev => ({ ...prev, campaigns: true }));
+
+    try {
+      // Load Excel campaign data using DataService - AWAIT COMPLETION
+      const campaignData = await DataService.loadExcelCampaignData(file);
+      
+      // Update state with campaign data FIRST using functional update to avoid stale data
+      setState(prev => ({ 
+        ...prev, 
+        campaignData,
+        isLoading: false 
+      }));
+      setUploadProgress(prev => ({ ...prev, campaigns: false }));
+
+      // ONLY THEN navigate to marketing analysis view after state is updated
+      if (onViewChange && campaignData.length > 0) {
+        // Small delay to ensure state update is processed
+        setTimeout(() => {
+          onViewChange('marketing-analysis');
+        }, 100);
+      }
+    } catch (error) {
+      setState(prev => ({ 
+        ...prev, 
+        error: error instanceof Error ? error.message : 'Failed to load campaign data',
+        isLoading: false 
+      }));
+      setUploadProgress(prev => ({ ...prev, campaigns: false }));
+    }
+  }, [onViewChange]);
+
   // Filter handlers
   const handleFilterChange = useCallback((newFilters: Partial<FilterCriteria>) => {
     setState(prev => ({
@@ -255,6 +295,20 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
 
   // Render content based on active view
   const renderContent = () => {
+    if (activeView === 'marketing-analysis') {
+      return <MarketingDashboard 
+        activePlatform={activePlatform} 
+        onPlatformChange={_onPlatformChange}
+        campaignData={state.campaignData}
+        inventoryData={state.inventoryData}
+        isLoading={state.isLoading}
+        error={state.error}
+        onCampaignUpload={handleCampaignUpload}
+        filters={state.filters}
+        onFilterChange={handleFilterChange}
+      />;
+    }
+
     if (activeView === 'data-management') {
       return (
         <div className="p-6"> {/* Removed extra top padding since main layout is fixed */}
@@ -264,7 +318,7 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
               Data Upload
             </h2>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Inventory Upload */}
               <div className="border border-dashed border-slate-300/60 rounded-xl p-6 hover:border-vyndo-primary-500/60 transition-colors">
                 <div className="text-center">
@@ -332,6 +386,47 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
                   {state.salesData.length > 0 && !uploadProgress.sales && (
                     <div className="mt-2 text-sm text-vyndo-green">
                       ✓ {state.salesData.length} records loaded
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Campaign Upload */}
+              <div className="border border-dashed border-slate-300/60 rounded-xl p-6 hover:border-vyndo-primary-500/60 transition-colors">
+                <div className="text-center">
+                  <FileSpreadsheet className="mx-auto h-12 w-12 text-gray-400" />
+                  <div className="mt-4">
+                    <label htmlFor="campaign-upload" className="cursor-pointer">
+                      <span className="mt-2 block text-sm font-medium text-vyndo-text">
+                        Upload Blinkit Campaign Excel
+                      </span>
+                      <span className="mt-1 block text-sm text-gray-500">
+                        Excel file with PRODUCT_RECOMMENDATION, PRODUCT_LISTING, BRAND_BOOSTER tabs
+                      </span>
+                    </label>
+                    <input
+                      id="campaign-upload"
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={handleCampaignUpload}
+                      className="hidden"
+                      disabled={uploadProgress.campaigns}
+                    />
+                  </div>
+                  {uploadProgress.campaigns && (
+                    <div className="mt-2 flex items-center justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      <span className="text-sm text-gray-600">Processing Excel...</span>
+                    </div>
+                  )}
+                  {state.campaignData.length > 0 && !uploadProgress.campaigns && (
+                    <div className="mt-2 text-sm text-vyndo-green">
+                      ✓ {state.campaignData.length} campaigns loaded
+                    </div>
+                  )}
+                  {!uploadProgress.campaigns && state.campaignData.length === 0 && (
+                    <div className="mt-2 text-sm text-blue-600">
+                      → Opens Marketing Analysis
                     </div>
                   )}
                 </div>
@@ -917,6 +1012,9 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
                 inventoryData={filteredInventory} 
                 salesData={filteredSales}
                 filters={state.filters}
+                campaignData={state.campaignData}
+                marketingKPIs={undefined} // Will be calculated in MarketingAnalysis
+                syncData={[]} // Will be calculated in MarketingAnalysis
               />
             )}
           </div>
