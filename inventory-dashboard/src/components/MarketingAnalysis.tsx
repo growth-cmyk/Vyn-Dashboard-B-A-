@@ -511,19 +511,19 @@ export const MarketingAnalysis: React.FC<MarketingAnalysisProps> = ({
                     <table className="w-full border-collapse" style={{ tableLayout: 'fixed' }}>
                       <thead>
                         <tr className="bg-slate-50 border-b-2 border-slate-200">
-                          <th className="text-left py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '40%' }}>
+                          <th className="text-left py-4 px-6 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '30%' }}>
                             PRODUCT NAME
                           </th>
-                          <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '15%' }}>
+                          <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '12%' }}>
                             SPEND
                           </th>
-                          <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '15%' }}>
-                            INVENTORY
+                          <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '13%' }}>
+                            STOCK vs ROP
                           </th>
                           <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400 border-r border-slate-200" style={{ width: '15%' }}>
                             ACTION
                           </th>
-                          <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400" style={{ width: '15%' }}>
+                          <th className="text-left py-4 px-4 text-xs font-bold uppercase tracking-wider text-slate-400" style={{ width: '30%' }}>
                             REASON
                           </th>
                         </tr>
@@ -542,6 +542,17 @@ export const MarketingAnalysis: React.FC<MarketingAnalysisProps> = ({
                             };
 
                             const getReasonLabel = (item: AdInventorySyncItem): string => {
+                              // Priority 1: ROP-based logic (most accurate)
+                              if (item.currentStock !== undefined && item.rop !== undefined) {
+                                if (item.currentStock < item.rop) {
+                                  return 'ROP Breached';
+                                }
+                                if (item.safetyStock !== undefined && item.currentStock < (item.rop + item.safetyStock)) {
+                                  return 'Safety Zone';
+                                }
+                              }
+                              
+                              // Priority 2: Strategic action-based labels
                               if (item.strategicAction.includes('SCALE ADS')) {
                                 const days = item.daysOfCover ? Math.round(item.daysOfCover) : 0;
                                 return days > 90 ? 'Flash Promo' : `${days} days stock`;
@@ -559,11 +570,14 @@ export const MarketingAnalysis: React.FC<MarketingAnalysisProps> = ({
                               <tr 
                                 key={`${item.sku}-${index}`} 
                                 className={`border-b border-slate-100 hover:bg-slate-50 transition-colors h-16 ${
-                                  index % 2 === 0 ? 'bg-white' : 'bg-slate-25'
+                                  // Subtle red highlight for below-ROP items
+                                  item.currentStock !== undefined && item.rop !== undefined && item.currentStock < item.rop
+                                    ? 'bg-red-50/50'
+                                    : index % 2 === 0 ? 'bg-white' : 'bg-slate-25'
                                 }`}
                               >
                                 {/* Product Name Column - STRICT WIDTH with TRUNCATION */}
-                                <td className="py-4 px-6 border-r border-slate-100" style={{ width: '40%' }}>
+                                <td className="py-4 px-6 border-r border-slate-100" style={{ width: '30%' }}>
                                   <div className="text-sm font-bold text-slate-900 truncate mb-1" title={item.campaignName}>
                                     {item.campaignName}
                                   </div>
@@ -573,17 +587,30 @@ export const MarketingAnalysis: React.FC<MarketingAnalysisProps> = ({
                                 </td>
                                 
                                 {/* Ad Spend Column - STRICT WIDTH */}
-                                <td className="py-4 px-4 border-r border-slate-100" style={{ width: '15%' }}>
+                                <td className="py-4 px-4 border-r border-slate-100" style={{ width: '12%' }}>
                                   <div className="text-sm font-bold text-slate-900 font-mono">
                                     ₹{(item.adSpend / 1000).toFixed(1)}K
                                   </div>
                                 </td>
                                 
-                                {/* Inventory Column - STRICT WIDTH */}
-                                <td className="py-4 px-4 border-r border-slate-100" style={{ width: '15%' }}>
-                                  <div className="text-sm font-semibold text-slate-700 font-mono">
-                                    {item.daysOfCover ? `${Math.round(item.daysOfCover)} days` : 'Unknown'}
-                                  </div>
+                                {/* Stock vs ROP Column - NEW */}
+                                <td className="py-4 px-4 border-r border-slate-100" style={{ width: '13%' }}>
+                                  {item.currentStock !== undefined && item.rop !== undefined ? (
+                                    <div>
+                                      <div className={`text-sm font-semibold font-mono ${
+                                        item.currentStock < item.rop ? 'text-red-600' : 'text-green-600'
+                                      }`}>
+                                        {item.currentStock} / {item.rop}
+                                      </div>
+                                      <div className="text-xs text-slate-500">
+                                        {item.currentStock < item.rop ? 'Below ROP' : 'Above ROP'}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm font-semibold text-slate-700 font-mono">
+                                      {item.daysOfCover ? `${Math.round(item.daysOfCover)} days` : 'Unknown'}
+                                    </div>
+                                  )}
                                 </td>
                                 
                                 {/* Action Column - STRICT WIDTH */}
@@ -600,7 +627,7 @@ export const MarketingAnalysis: React.FC<MarketingAnalysisProps> = ({
                                 </td>
                                 
                                 {/* Reason Column - STRICT WIDTH */}
-                                <td className="py-4 px-4" style={{ width: '15%' }}>
+                                <td className="py-4 px-4" style={{ width: '30%' }}>
                                   <div className="text-sm text-slate-600 font-medium truncate">
                                     {getReasonLabel(item)}
                                   </div>

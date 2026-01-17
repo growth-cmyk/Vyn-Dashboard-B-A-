@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { PlatformSwitcher } from './PlatformSwitcher';
+import { CloudSyncIndicator } from './CloudSyncIndicator';
 import { UserPreferenceService } from '../services/UserPreferenceService';
 import type { Platform } from '../types';
 import { PLATFORM } from '../types';
@@ -21,6 +22,7 @@ interface MainLayoutProps {
   onViewChange: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => void;
   activePlatform?: Platform;
   onPlatformChange?: (platform: Platform) => void;
+  cloudSyncStatus?: 'syncing' | 'synced' | 'offline' | 'error';
 }
 
 interface NavItem {
@@ -43,7 +45,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   activeView, 
   onViewChange,
   activePlatform = PLATFORM.BLINKIT,
-  onPlatformChange = () => {}
+  onPlatformChange = () => {},
+  cloudSyncStatus = 'offline'
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -160,8 +163,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
           })}
         </nav>
 
-        {/* Sidebar Footer with Theme Toggle */}
+        {/* Sidebar Footer with Theme Toggle and Cloud Sync */}
         <div className="p-4 border-t border-slate-200/60 dark:border-slate-700/60 flex-shrink-0 space-y-3"> {/* Subtle borders */}
+          {/* Cloud Sync Indicator */}
+          <CloudSyncIndicator status={cloudSyncStatus} className="mb-3" />
+          
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Theme</span> {/* Professional font weight */}
             <ThemeToggle size="sm" />

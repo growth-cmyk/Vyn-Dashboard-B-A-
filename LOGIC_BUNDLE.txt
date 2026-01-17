@@ -1,0 +1,561 @@
+# Vyndo Analytics Platform v1.1 - Logic Bundle
+
+## Overview
+This document consolidates all business logic, calculations, and algorithms used in the Vyndo Analytics Platform, including cloud persistence strategies and statistical ROP calculations.
+
+## 1. Statistical ROP Calculation (NEW in v1.1)
+
+### Formula
+```
+ROP = Demand During Lead Time + Safety Stock
+
+Where:
+- Demand During Lead Time = Avg Daily Demand × Lead Time (days)
+- Safety Stock = Z-score × σ × √(Lead Time in months) + Forecast Qty
+- σ = Standard Deviation of monthly demand over 12 months
+- Z-score = Based on service level (e.g., 1.64 for 95%)
+```
+
+### Implementation (AnalyticsService.calculateStatisticalROP)
+```typescript
+// Step 1: Get 12-month demand history from DataService demand map
+const demandMap = DataService.getDemandMap();
+const monthlyDemand = demandMap.get(itemId);
+
+// Step 2: Check if we have sufficient data (3+ months)
+if (!monthlyDemand || monthlyDemand.length < 3) {
+  // Fallback to simple ROP calculation
+  return calculateSimpleROP(item, leadTime, safetyDays);
+}
+
+// Step 3: Calculate average monthly demand
+const avgMonthlyDemand = monthlyDemand.reduce((sum, qty) => sum + qty, 0) / monthlyDemand.length;
+const avgDailyDemand = avgMonthlyDemand / 30;
+
+// Step 4: Calculate standard deviation (σ)
+const variance = monthlyDemand.reduce((sum, qty) => {
+  const diff = qty - avgMonthlyDemand;
+  return sum + (diff * diff);
+}, 0) / monthlyDemand.length;
+const standardDeviation = Math.sqrt(variance);
+
+// Step 5: Get Z-score from service level
+const zScore = Z_TABLE[serviceLevel] || Z_TABLE[95];
+
+// Step 6: Calculate safety stock
+const leadTimeMonths = leadTime / 30;
+const safetyStock = (zScore * standardDeviation * Math.sqrt(leadTimeMonths)) + forecastQty;
+
+// Step 7: Calculate demand during lead time
+const demandDuringLeadTime = avgDailyDemand * leadTime;
+
+// Step 8: Calculate ROP
+const rop = demandDuringLeadTime + safetyStock;
+
+return {
+  rop,
+  safetyStock,
+  avgMonthlyDemand,
+  avgDailyDemand,
+  standardDeviation,
+  serviceLevel,
+  zScore,
+  leadTimeMonths,
+  forecastQty,
+  demandDuringLeadTime,
+  calculationMethod: 'statistical'
+};
+```
+
+### Z-Score Table
+```typescript
+const Z_TABLE: Record<number, number> = {
+  85: 1.04,   // 85% service level
+  90: 1.28,   // 90% service level
+  95: 1.64,   // 95% service level (default)
+  98: 2.05,   // 98% service level
+  99: 2.33,   // 99% service level
+  99.8: 2.88  // 99.8% service level
+};
+```
+
+### Simple ROP Fallback
+```typescript
+// Used when insufficient monthly demand data (<3 months)
+const salesVelocity = item.last30Days / 30;
+const safetyStock = salesVelocity * safetyDays;
+const demandDuringLeadTime = salesVelocity * leadTime;
+const rop = demandDuringLeadTime + safetyStock;
+
+return {
+  rop,
+  safetyStock,
+  avgDailyDemand: salesVelocity,
+  calculationMethod: 'simple'
+};
+```
+
+## 2. Demand Map Generation (NEW in v1.1)
+
+### Automatic Extraction from Sales CSV
+```typescript
+// DataService.buildDemandMapFromSales()
+
+// Step 1: Clear existing demand map
+demandMap.clear();
+
+// Step 2: Group sales by Item ID and Month
+const salesByItemAndMonth = new Map<string, Map<string, number>>();
+
+salesRecords.forEach(record => {
+  const itemId = record.itemId;
+  const orderDate = record.orderDate;
+  
+  // Extract month key (YYYY-MM format)
+  const monthKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}`;
+  
+  // Initialize nested map if needed
+  if (!salesByItemAndMonth.has(itemId)) {
+    salesByItemAndMonth.set(itemId, new Map());
+  }
+  
+  const monthMap = salesByItemAndMonth.get(itemId)!;
+  
+  // Sum quantities for this month
+  const currentQty = monthMap.get(monthKey) || 0;
+  monthMap.set(monthKey, currentQty + record.quantity);
+});
+
+// Step 3: Convert to 12-month arrays (oldest to newest)
+const now = new Date();
+const monthKeys: string[] = [];
+
+// Generate last 12 months in chronological order
+for (let i = 11; i >= 0; i--) {
+  const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  monthKeys.push(monthKey);
+}
+
+// Step 4: Build demand arrays for each item
+salesByItemAndMonth.forEach((monthMap, itemId) => {
+  const demandArray = monthKeys.map(monthKey => monthMap.get(monthKey) || 0);
+  demandMap.set(itemId, demandArray);
+});
+
+// Step 5: Sync to cloud storage
+await storageLayer.syncDemandHistory(demandMap);
+```
+
+### Date Parsing Logic
+```typescript
+// Supports multiple date formats
+function parseDate(dateStr: string): Date {
+  // DD-MM-YYYY format (Blinkit)
+  if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+    const [day, month, year] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0); // Noon to avoid timezone issues
+  }
+  
+  // MM/DD/YYYY format (Amazon)
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+    const [month, day, year] = dateStr.split('/').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+  
+  // YYYY-MM-DD format (ISO)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+  
+  // Excel serial number
+  if (/^\d+$/.test(dateStr)) {
+    const excelEpoch = new Date(1899, 11, 30);
+    const days = parseInt(dateStr);
+    return new Date(excelEpoch.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+  
+  // Fallback to Date constructor
+  return new Date(dateStr);
+}
+```
+
+## 3. Cloud Sync Strategy (NEW in v1.1)
+
+### StorageLayer Sync Flow
+```typescript
+// Step 1: Always save to localStorage first (immediate backup)
+saveToLocalStorage(data);
+
+// Step 2: Try cloud save if online
+if (isOnline) {
+  try {
+    await supabaseService.saveData(data);
+    updateSyncStatus({ status: 'synced', lastSyncTime: new Date() });
+  } catch (error) {
+    // Step 3: Queue for later sync if cloud fails
+    queueForSync('data', data);
+    updateSyncStatus({ status: 'failed', message: 'Cloud save failed - data stored locally' });
+  }
+} else {
+  // Step 4: Queue for sync when offline
+  queueForSync('data', data);
+  updateSyncStatus({ status: 'offline', message: 'Saved locally - will sync when online' });
+}
+```
+
+### Automatic Retry Logic
+```typescript
+// SupabaseService.withRetry()
+async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const maxAttempts = 3;
+  const baseDelay = 1000;
+  const maxDelay = 10000;
+  const backoffFactor = 2;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        throw error;
+      }
+      
+      const delay = Math.min(
+        baseDelay * Math.pow(backoffFactor, attempt - 1),
+        maxDelay
+      );
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+```
+
+### Pending Sync Queue
+```typescript
+// Queue operations for later sync
+function queueForSync(type: string, data: any): void {
+  const queue = getPendingSync();
+  queue.push({
+    type,
+    data,
+    timestamp: new Date().toISOString()
+  });
+  localStorage.setItem('pending_sync', JSON.stringify(queue));
+}
+
+// Process queue when back online
+async function syncPendingData(): Promise<void> {
+  const queue = getPendingSync();
+  
+  for (const item of queue) {
+    try {
+      if (item.type === 'snapshots') {
+        await supabaseService.saveInventorySnapshots(item.data);
+      } else if (item.type === 'demand') {
+        const demandMap = new Map(item.data);
+        await supabaseService.saveDemandHistory(demandMap);
+      }
+      // Remove from queue after successful sync
+    } catch (error) {
+      // Keep in queue for next attempt
+      console.error(`Failed to sync ${item.type}:`, error);
+    }
+  }
+  
+  clearPendingSync();
+}
+```
+
+## 4. Stock Status Classification
+
+### Algorithm
+```typescript
+function classifyStockStatus(item: InventoryItem, salesVelocity: number, leadTime: number, safetyDays: number): StockStatus {
+  const currentStock = item.totalSellable;
+  
+  // Out of stock
+  if (currentStock === 0) {
+    return 'out-of-stock';
+  }
+  
+  // Calculate days of cover
+  const daysOfCover = salesVelocity > 0 ? currentStock / salesVelocity : Infinity;
+  
+  // Expiry risk (6-month threshold)
+  if (daysOfCover >= 180) {
+    return 'expiry-risk';
+  }
+  
+  // Understock (below lead time + safety days)
+  if (daysOfCover < leadTime + safetyDays) {
+    return 'understock';
+  }
+  
+  // Overstock (45-180 days)
+  if (daysOfCover >= 45) {
+    return 'overstock';
+  }
+  
+  // Healthy (lead time + safety days to 45 days)
+  return 'healthy';
+}
+```
+
+### Platform-Specific Lead Times
+```typescript
+function getPlatformLeadTime(platform: Platform): number {
+  switch (platform) {
+    case 'Blinkit':
+      return 15; // 15-day lead time
+    case 'Amazon':
+      return 7;  // 7-day lead time
+    case 'All':
+      return 0;  // Calculated per item
+    default:
+      return 15; // Default to Blinkit
+  }
+}
+```
+
+## 5. Sales Velocity Calculation
+
+### Algorithm
+```typescript
+function calculateSalesVelocity(item: InventoryItem, timePeriod: TimePeriod): number {
+  switch (timePeriod) {
+    case 'last-7-days':
+      return item.last7Days / 7;
+    case 'last-15-days':
+      return item.last15Days / 15;
+    case 'last-30-days':
+      return item.last30Days / 30;
+    default:
+      return item.last30Days / 30; // Default to 30-day velocity
+  }
+}
+```
+
+## 6. ROAS Calculation
+
+### Formula
+```
+ROAS = (Direct Sales + Indirect Sales) / Budget Consumed
+```
+
+### Implementation
+```typescript
+function calculateROAS(campaign: AdCampaignRecord): number {
+  const totalSales = campaign.directSales + (campaign.indirectSales || 0);
+  const budgetConsumed = campaign.budgetConsumed;
+  
+  if (budgetConsumed === 0) {
+    return 0;
+  }
+  
+  return totalSales / budgetConsumed;
+}
+```
+
+## 7. Marketing Strategic Recommendations
+
+### Algorithm
+```typescript
+function getStrategicRecommendation(
+  campaign: AdCampaignRecord,
+  inventoryStatus: StockStatus,
+  ropResult?: StatisticalROPResult,
+  currentStock?: number
+): StrategicAction {
+  const roas = calculateROAS(campaign);
+  
+  // ROP-based logic (if available)
+  if (ropResult && currentStock !== undefined) {
+    // Below ROP - pause ads to prevent stockouts
+    if (currentStock < ropResult.rop) {
+      return 'PAUSE ADS';
+    }
+    
+    // In safety zone - monitor closely
+    if (currentStock < ropResult.rop + ropResult.safetyStock) {
+      return 'MONITOR';
+    }
+    
+    // Above ROP + Safety Stock - scale if high ROAS
+    if (roas > 2.0) {
+      return 'SCALE ADS';
+    }
+  }
+  
+  // Fallback to stock status logic
+  if (inventoryStatus === 'out-of-stock' || inventoryStatus === 'understock') {
+    return 'PAUSE ADS';
+  }
+  
+  if (inventoryStatus === 'healthy' && roas > 2.0) {
+    return 'SCALE ADS';
+  }
+  
+  if (inventoryStatus === 'overstock') {
+    return 'SCALE ADS';
+  }
+  
+  return 'MONITOR';
+}
+```
+
+## 8. Amazon Fee Calculations
+
+### Referral Fee (15%)
+```typescript
+function calculateAmazonFees(grossRevenue: number): AmazonMetrics {
+  const referralFee = grossRevenue * 0.15;
+  const estimatedPayout = grossRevenue - referralFee;
+  
+  return {
+    grossRevenue,
+    referralFee,
+    estimatedPayout,
+    feePercentage: 15
+  };
+}
+```
+
+## 9. Data Validation
+
+### Inventory Validation
+```typescript
+function validateInventoryItem(item: any): ValidationResult {
+  const errors: ValidationError[] = [];
+  const warnings: ValidationWarning[] = [];
+  
+  // Required fields
+  if (!item.itemId || item.itemId.trim() === '') {
+    errors.push({ field: 'itemId', message: 'Item ID is required' });
+  }
+  
+  if (!item.itemName || item.itemName.trim() === '') {
+    errors.push({ field: 'itemName', message: 'Item Name is required' });
+  }
+  
+  // Numeric validations
+  if (item.totalSellable < 0) {
+    errors.push({ field: 'totalSellable', message: 'Total Sellable cannot be negative' });
+  }
+  
+  // Warnings for missing optional fields
+  if (!item.last7Days && !item.last15Days && !item.last30Days) {
+    warnings.push({ field: 'sales', message: 'No sales velocity data available' });
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+```
+
+## 10. Blob Storage Re-hydration
+
+### Dashboard Re-hydration Flow
+```typescript
+// BlobStorageService.rehydrateDashboard()
+async function rehydrateDashboard(platform: string): Promise<{
+  inventory: File | null;
+  sales: File | null;
+  campaign: File | null;
+}> {
+  // Step 1: Fetch latest blob URLs from Supabase
+  const [inventoryMeta, salesMeta, campaignMeta] = await Promise.all([
+    getLatestBlobUrl('inventory', platform),
+    getLatestBlobUrl('sales', platform),
+    getLatestBlobUrl('campaign', platform),
+  ]);
+  
+  // Step 2: Download files from blob URLs
+  const results = {
+    inventory: null as File | null,
+    sales: null as File | null,
+    campaign: null as File | null,
+  };
+  
+  if (inventoryMeta) {
+    const blob = await downloadFile(inventoryMeta.blobUrl);
+    results.inventory = new File([blob], inventoryMeta.filename, { type: 'text/csv' });
+  }
+  
+  if (salesMeta) {
+    const blob = await downloadFile(salesMeta.blobUrl);
+    results.sales = new File([blob], salesMeta.filename, { type: 'text/csv' });
+  }
+  
+  if (campaignMeta) {
+    const blob = await downloadFile(campaignMeta.blobUrl);
+    results.campaign = new File([blob], campaignMeta.filename, { 
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+    });
+  }
+  
+  return results;
+}
+```
+
+## 11. Performance Optimizations
+
+### Virtualized Table Rendering
+```typescript
+// React Window for large datasets
+<FixedSizeList
+  height={600}
+  itemCount={items.length}
+  itemSize={50}
+  width="100%"
+>
+  {({ index, style }) => (
+    <div style={style}>
+      {renderRow(items[index])}
+    </div>
+  )}
+</FixedSizeList>
+```
+
+### Debounced Search
+```typescript
+const debouncedSearch = useMemo(
+  () => debounce((searchTerm: string) => {
+    setFilteredItems(filterItems(items, searchTerm));
+  }, 300),
+  [items]
+);
+```
+
+## 12. Data Retention & Cleanup
+
+### Automatic Cleanup Function (Supabase)
+```sql
+CREATE OR REPLACE FUNCTION cleanup_old_inventory_data()
+RETURNS void AS $
+BEGIN
+  -- Delete inventory history older than 1 year
+  DELETE FROM inventory_history 
+  WHERE created_at < NOW() - INTERVAL '1 year';
+  
+  -- Delete file uploads older than 6 months
+  DELETE FROM file_uploads 
+  WHERE created_at < NOW() - INTERVAL '6 months';
+  
+  -- Delete marketing history older than 1 year
+  DELETE FROM marketing_history 
+  WHERE created_at < NOW() - INTERVAL '1 year';
+  
+  -- Demand history is kept indefinitely (critical for ROP)
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+## Version History
+- **v1.0.0**: Initial business logic implementation
+- **v1.1.0**: Added Statistical ROP calculations, demand map generation, cloud sync strategies, blob re-hydration logic

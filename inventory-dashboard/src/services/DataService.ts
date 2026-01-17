@@ -27,6 +27,58 @@ import {
  * Service for loading and processing CSV data files
  */
 export class DataService {
+  // GLOBAL DEMAND MAP: Maps Item ID to 12-month historical demand array
+  // Format: { itemId: [month1Qty, month2Qty, ..., month12Qty] }
+  private static demandMap: Map<string, number[]> = new Map();
+
+  /**
+   * Get the global demand map (for use by AnalyticsService)
+   */
+  static getDemandMap(): Map<string, number[]> {
+    return this.demandMap;
+  }
+
+  /**
+   * Clear the demand map (useful for testing or resetting)
+   */
+  static clearDemandMap(): void {
+    this.demandMap.clear();
+  }
+
+  /**
+   * Initialize demand map from cloud storage on app startup
+   */
+  static async initializeDemandMap(): Promise<void> {
+    try {
+      const { storageLayer } = await import('./StorageLayer');
+      const cloudDemand = await storageLayer.getDemandHistory();
+      
+      if (cloudDemand && cloudDemand.size > 0) {
+        this.demandMap = cloudDemand;
+        console.log(`✅ Loaded ${cloudDemand.size} items from cloud demand history`);
+      } else {
+        console.log('ℹ️ No cloud demand history found - will build from next sales upload');
+      }
+    } catch (error) {
+      console.warn('Failed to load demand history from cloud:', error);
+      // Continue without cloud data - will build from next sales upload
+    }
+  }
+
+  /**
+   * Sync demand map to cloud storage after building from sales data
+   */
+  private static async syncDemandMapToCloud(): Promise<void> {
+    try {
+      const { storageLayer } = await import('./StorageLayer');
+      await storageLayer.syncDemandHistory(this.demandMap);
+      console.log('✅ Demand map synced to cloud storage');
+    } catch (error) {
+      console.warn('Failed to sync demand map to cloud:', error);
+      // Continue without cloud sync - data is still available in memory
+    }
+  }
+
   /**
    * Load and parse inventory data from CSV file (supports both detailed and master inventory formats)
    * Enhanced version that detects and processes cumulative history
@@ -180,6 +232,7 @@ export class DataService {
 
   /**
    * Load and parse sales data from CSV file
+   * ENHANCED: Builds global demand map for Statistical ROP calculations
    */
   static async loadSalesData(file: File): Promise<SalesRecord[]> {
     try {
@@ -205,10 +258,79 @@ export class DataService {
         });
       }
 
-      return this.transformSalesData(csvData);
+      const salesRecords = this.transformSalesData(csvData);
+      
+      // BUILD DEMAND MAP: Group sales by Item ID and Month, sum quantities
+      this.buildDemandMapFromSales(salesRecords);
+      
+      // SYNC TO CLOUD: Save demand map to cloud storage
+      await this.syncDemandMapToCloud();
+      
+      return salesRecords;
     } catch (error) {
       throw new Error(`Failed to load sales data: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Build demand map from sales records
+   * Groups sales by Item ID and Month, sums quantities to create 12-month demand history
+   * 
+   * Logic:
+   * 1. Parse Order Date (DD-MM-YYYY format)
+   * 2. Extract month from date
+   * 3. Group by Item ID and Month
+   * 4. Sum Quantity for each group
+   * 5. Store as 12-month array (oldest to newest)
+   */
+  private static buildDemandMapFromSales(salesRecords: SalesRecord[]): void {
+    console.log('🔧 Building demand map from sales data...');
+    
+    // Clear existing demand map
+    this.demandMap.clear();
+    
+    // Group sales by Item ID and Month
+    const salesByItemAndMonth = new Map<string, Map<string, number>>();
+    
+    salesRecords.forEach(record => {
+      const itemId = record.itemId;
+      const orderDate = record.orderDate;
+      
+      // Extract month key (YYYY-MM format)
+      const monthKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      // Initialize nested map if needed
+      if (!salesByItemAndMonth.has(itemId)) {
+        salesByItemAndMonth.set(itemId, new Map());
+      }
+      
+      const monthMap = salesByItemAndMonth.get(itemId)!;
+      
+      // Sum quantities for this month
+      const currentQty = monthMap.get(monthKey) || 0;
+      monthMap.set(monthKey, currentQty + record.quantity);
+    });
+    
+    // Convert to 12-month arrays (oldest to newest)
+    const now = new Date();
+    const monthKeys: string[] = [];
+    
+    // Generate last 12 months in chronological order (oldest to newest)
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthKeys.push(monthKey);
+    }
+    
+    // Build demand arrays for each item
+    salesByItemAndMonth.forEach((monthMap, itemId) => {
+      const demandArray = monthKeys.map(monthKey => monthMap.get(monthKey) || 0);
+      this.demandMap.set(itemId, demandArray);
+      
+      console.log(`📊 Demand map for Item ${itemId}:`, demandArray);
+    });
+    
+    console.log(`✅ Demand map built: ${this.demandMap.size} items with historical demand`);
   }
 
   /**

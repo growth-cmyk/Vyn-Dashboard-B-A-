@@ -1,7 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Package, Settings, Download, AlertCircle, Clock, TrendingUp, Calendar } from 'lucide-react';
+import { Package, Settings, Download, AlertCircle, Clock, TrendingUp, Calendar, Info, AlertTriangle } from 'lucide-react';
 import type { InventoryItem, CumulativeHistoryData, Platform } from '../types';
+import { Z_TABLE } from '../types';
 import { AnalyticsService, ExportService, HistoryService } from '../services';
+import { ReplenishmentService } from '../services/ReplenishmentService';
+import { storageLayer } from '../services/StorageLayer';
 
 interface ReplenishmentPlannerProps {
   inventoryData: InventoryItem[];
@@ -9,29 +12,62 @@ interface ReplenishmentPlannerProps {
   platform?: Platform;
 }
 
-// Local storage keys for persistence
+// Local storage keys for persistence (fallback only)
 const STORAGE_KEYS = {
   LEAD_TIME: 'vyndo_replenishment_lead_time',
-  SAFETY_DAYS: 'vyndo_replenishment_safety_days'
+  SAFETY_DAYS: 'vyndo_replenishment_safety_days',
+  SERVICE_LEVEL: 'vyndo_service_level',
+  FORECAST_QUANTITIES: 'vyndo_forecast_quantities'
 };
+
+// Service level options for statistical ROP
+const SERVICE_LEVELS = [85, 90, 95, 98, 99, 99.8];
 
 export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({ 
   inventoryData, 
   cumulativeHistory, 
   platform: _platform 
 }) => {
-  // Load settings from localStorage or use defaults
-  const [leadTime, setLeadTime] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.LEAD_TIME);
-    return saved ? parseInt(saved, 10) : 15; // Updated default to 15 days
-  });
-  
-  const [safetyDays, setSafetyDays] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SAFETY_DAYS);
-    return saved ? parseInt(saved, 10) : 3; // Remains 3 days
-  });
-  
+  // Load settings from cloud/localStorage
+  const [leadTime, setLeadTime] = useState(15); // Default 15 days
+  const [safetyDays, setSafetyDays] = useState(3); // Default 3 days
+  const [serviceLevel, setServiceLevel] = useState(95); // Default 95%
+  const [forecastQuantities, setForecastQuantities] = useState<Record<string, number>>({});
   const [showConfig, setShowConfig] = useState(false);
+  const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
+
+  // Load preferences from cloud on mount
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const cloudPrefs = await storageLayer.getUserPreferences();
+        
+        if (cloudPrefs) {
+          setServiceLevel(cloudPrefs.serviceLevel);
+          setForecastQuantities(cloudPrefs.forecastQuantities);
+          setLeadTime(cloudPrefs.leadTime);
+          setSafetyDays(cloudPrefs.safetyDays);
+        } else {
+          // Fallback to localStorage if no cloud data
+          const savedServiceLevel = localStorage.getItem(STORAGE_KEYS.SERVICE_LEVEL);
+          const savedForecastQty = localStorage.getItem(STORAGE_KEYS.FORECAST_QUANTITIES);
+          const savedLeadTime = localStorage.getItem(STORAGE_KEYS.LEAD_TIME);
+          const savedSafetyDays = localStorage.getItem(STORAGE_KEYS.SAFETY_DAYS);
+          
+          if (savedServiceLevel) setServiceLevel(parseFloat(savedServiceLevel));
+          if (savedForecastQty) setForecastQuantities(JSON.parse(savedForecastQty));
+          if (savedLeadTime) setLeadTime(parseInt(savedLeadTime, 10));
+          if (savedSafetyDays) setSafetyDays(parseInt(savedSafetyDays, 10));
+        }
+      } catch (error) {
+        console.error('Failed to load preferences:', error);
+      } finally {
+        setIsLoadingPreferences(false);
+      }
+    };
+
+    loadPreferences();
+  }, []);
 
   // Filter inventory to latest date when cumulative history is available
   const currentInventoryData = useMemo(() => {
@@ -52,20 +88,33 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
     return new Date();
   }, [cumulativeHistory]);
 
-  // Save settings to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.LEAD_TIME, leadTime.toString());
-  }, [leadTime]);
+  // Sync preferences to cloud when they change
+  const syncPreferences = async (updates: Partial<{
+    serviceLevel: number;
+    forecastQuantities: Record<string, number>;
+    leadTime: number;
+    safetyDays: number;
+  }>) => {
+    const preferences = {
+      serviceLevel: updates.serviceLevel ?? serviceLevel,
+      forecastQuantities: updates.forecastQuantities ?? forecastQuantities,
+      leadTime: updates.leadTime ?? leadTime,
+      safetyDays: updates.safetyDays ?? safetyDays
+    };
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.SAFETY_DAYS, safetyDays.toString());
-  }, [safetyDays]);
+    try {
+      await storageLayer.syncUserPreferences(preferences);
+    } catch (error) {
+      console.error('Failed to sync preferences:', error);
+    }
+  };
 
-  // Handle setting changes with validation
+  // Handle setting changes with cloud sync
   const handleLeadTimeChange = (value: string) => {
     const numValue = parseInt(value, 10);
     if (!isNaN(numValue) && numValue >= 1 && numValue <= 30) {
       setLeadTime(numValue);
+      syncPreferences({ leadTime: numValue });
     }
   };
 
@@ -73,7 +122,25 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
     const numValue = parseInt(value, 10);
     if (!isNaN(numValue) && numValue >= 1 && numValue <= 14) {
       setSafetyDays(numValue);
+      syncPreferences({ safetyDays: numValue });
     }
+  };
+
+  const handleServiceLevelChange = (value: string) => {
+    const numValue = parseFloat(value);
+    if (!isNaN(numValue) && SERVICE_LEVELS.includes(numValue)) {
+      setServiceLevel(numValue);
+      syncPreferences({ serviceLevel: numValue });
+    }
+  };
+
+  const handleForecastQuantityChange = (itemKey: string, value: number) => {
+    const newForecastQuantities = {
+      ...forecastQuantities,
+      [itemKey]: Math.max(0, value || 0)
+    };
+    setForecastQuantities(newForecastQuantities);
+    syncPreferences({ forecastQuantities: newForecastQuantities });
   };
 
   // Calculate replenishment recommendations with current parameters
@@ -105,27 +172,54 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
     };
   }, [recommendations]);
 
-  // Export purchase order CSV
+  // Export purchase order CSV with Statistical ROP data
   const handleExportPurchaseOrder = () => {
     if (recommendations.length === 0) {
       alert('No items need restocking at this time.');
       return;
     }
 
-    const csvData = recommendations.map(rec => ({
-      'SKU ID': rec.itemId,
-      'Product Name': rec.itemName,
-      'Location': rec.warehouseFacilityName,
-      'Current Stock': rec.currentStock,
-      'Recommended Order Quantity': rec.recommendedOrderQuantity,
-      'Sales Velocity (Daily)': rec.salesVelocity.toFixed(2),
-      'Days of Cover': Math.round(rec.daysOfCover),
-      'Urgency Score': rec.urgencyScore.toFixed(2),
-      'Lead Time (Days)': rec.leadTime,
-      'Safety Stock (Days)': Math.round(rec.safetyStock / rec.salesVelocity)
-    }));
+    const csvData = recommendations.map(rec => {
+      const itemKey = `${rec.itemId}-${rec.warehouseFacilityId}`;
+      const forecastQty = forecastQuantities[itemKey] || 0;
+      
+      // Calculate ROP using ReplenishmentService
+      const ropResult = ReplenishmentService.calculateStatisticalROP(
+        currentInventoryData.find(item => 
+          item.itemId === rec.itemId && 
+          item.warehouseFacilityId === rec.warehouseFacilityId
+        )!,
+        'Blinkit',
+        serviceLevel,
+        forecastQty
+      );
 
-    ExportService.exportToCSV(csvData, `purchase-order-${new Date().toISOString().split('T')[0]}.csv`);
+      return {
+        'SKU ID': rec.itemId,
+        'Product Name': rec.itemName,
+        'Location': rec.warehouseFacilityName,
+        'Current Stock': rec.currentStock,
+        'ROP (Reorder Point)': ropResult.rop,
+        'Current Stock vs ROP': rec.currentStock - ropResult.rop,
+        'Safety Stock': ropResult.safetyStock,
+        'Recommended Order Quantity': rec.recommendedOrderQuantity,
+        'Sales Velocity (Daily)': rec.salesVelocity.toFixed(2),
+        'Days of Cover': Math.round(rec.daysOfCover),
+        'Service Level (%)': ropResult.serviceLevel,
+        'Standard Deviation (σ)': ropResult.standardDeviation.toFixed(2),
+        'Calculation Method': ropResult.calculationMethod === 'statistical' ? 'Statistical' : 'Simple (No Monthly Data)',
+        'Historical Data Source': ropResult.calculationMethod === 'statistical' ? 'Sales File (12 Months)' : 'Simple Fallback',
+        'Lead Time (Days)': rec.leadTime,
+        'Forecast Qty': forecastQty,
+        'Urgency Score': rec.urgencyScore.toFixed(2)
+      };
+    });
+
+    // Generate filename with service level: vyndo-po-95pct-2026-01-15.csv
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `vyndo-po-${serviceLevel}pct-${dateStr}.csv`;
+    
+    ExportService.exportToCSV(csvData, filename);
   };
 
   // Format days of cover display
@@ -146,6 +240,16 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
         <button className="bg-vyndo-orange text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-orange-600 transition-colors">
           Upload Data to Start
         </button>
+      </div>
+    );
+  }
+
+  if (isLoadingPreferences) {
+    return (
+      <div className="text-center py-12 text-gray-500">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-vyndo-orange border-t-transparent mx-auto mb-4"></div>
+        <h3 className="text-lg font-medium text-vyndo-text mb-2">Loading ROP Settings</h3>
+        <p className="text-sm">Syncing your preferences from cloud...</p>
       </div>
     );
   }
@@ -200,25 +304,42 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
         {/* Configuration Panel */}
         {showConfig && (
           <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-            <h3 className="text-md font-medium text-gray-900 mb-3">Replenishment Parameters</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <h3 className="text-md font-medium text-gray-900 mb-3">Statistical ROP Model Configuration</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Lead Time (Days)
+                  Lead Time (Days) - Read Only
                 </label>
                 <input
                   type="number"
                   min="1"
                   max="30"
                   value={leadTime}
-                  onChange={(e) => handleLeadTimeChange(e.target.value)}
-                  className="w-full rounded-lg border-gray-300 shadow-sm focus:border-vyndo-orange focus:ring-vyndo-orange"
+                  disabled
+                  className="w-full rounded-lg border-gray-300 bg-gray-100 shadow-sm cursor-not-allowed"
                 />
-                <p className="text-xs text-gray-500 mt-1">Time between placing order and receiving inventory (saved automatically)</p>
+                <p className="text-xs text-gray-500 mt-1">Platform-specific: 15 days (Blinkit), 7 days (Amazon)</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Safety Stock (Days)
+                  Service Level (%)
+                </label>
+                <select
+                  value={serviceLevel}
+                  onChange={(e) => handleServiceLevelChange(e.target.value)}
+                  className="w-full rounded-lg border-gray-300 shadow-sm focus:border-vyndo-orange focus:ring-vyndo-orange"
+                >
+                  {SERVICE_LEVELS.map(level => (
+                    <option key={level} value={level}>
+                      {level}% (Z = {Z_TABLE[level]})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Target probability of not stocking out (saved automatically)</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Safety Stock (Days) - Legacy
                 </label>
                 <input
                   type="number"
@@ -228,12 +349,15 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
                   onChange={(e) => handleSafetyDaysChange(e.target.value)}
                   className="w-full rounded-lg border-gray-300 shadow-sm focus:border-vyndo-orange focus:ring-vyndo-orange"
                 />
-                <p className="text-xs text-gray-500 mt-1">Buffer stock to prevent stockouts (saved automatically)</p>
+                <p className="text-xs text-gray-500 mt-1">Used for items without monthly demand data</p>
               </div>
             </div>
             <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <p className="text-sm text-blue-800">
-                <strong>Formula:</strong> Recommended Order = (Lead Time × Daily Sales) + Safety Stock - Current Stock
+                <strong>ROP Formula:</strong> ROP = (Avg Daily Demand × Lead Time) + Safety Stock
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                Safety Stock = σ × √(Lead Time in Months) × Z + Forecast Qty
               </p>
             </div>
             <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
@@ -296,7 +420,44 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
                     Days of Cover
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Recommended Order
+                    Safety Stock
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <div className="flex items-center">
+                      ROP (Reorder Point)
+                      <div className="group relative ml-1">
+                        <Info className="h-4 w-4 text-gray-400 cursor-help" />
+                        <div 
+                          className="hidden group-hover:block absolute rounded-xl shadow-2xl -left-24 top-6"
+                          style={{ 
+                            backgroundColor: '#2a0e06', 
+                            opacity: 1, 
+                            zIndex: 9999, 
+                            position: 'absolute',
+                            border: '2px solid #ef5326',
+                            padding: '16px',
+                            color: '#ffffff',
+                            fontSize: '12px',
+                            minWidth: '280px',
+                            maxWidth: '400px',
+                            whiteSpace: 'normal',
+                            wordBreak: 'break-word',
+                            textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                          }}
+                        >
+                          ROP = (Demand during Lead Time) + Safety Stock
+                        </div>
+                      </div>
+                    </div>
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Forecast Qty
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Historical Data Source
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Data Quality
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Urgency
@@ -304,61 +465,232 @@ export const ReplenishmentPlanner: React.FC<ReplenishmentPlannerProps> = ({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {recommendations.map((rec) => (
-                  <tr key={`${rec.itemId}-${rec.warehouseFacilityId}`} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{rec.itemName}</div>
-                      <div className="text-sm text-gray-500">{rec.itemId}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {rec.warehouseFacilityName}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{rec.currentStock.toLocaleString()}</div>
-                      <div className="text-xs text-gray-500">units</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{rec.salesVelocity.toFixed(1)}</div>
-                      <div className="text-xs text-gray-500">units/day</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <Clock className="h-4 w-4 text-gray-400 mr-1" />
-                        <span className={`text-sm font-medium ${
-                          rec.daysOfCover <= 0 ? 'text-red-600' : 
-                          rec.daysOfCover < 7 ? 'text-amber-600' : 'text-gray-900'
-                        }`}>
-                          {formatDaysOfCover(rec.daysOfCover)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-lg font-bold text-vyndo-orange">
-                        {rec.recommendedOrderQuantity.toLocaleString()}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Lead: {rec.leadTime}d + Safety: {Math.round(rec.safetyStock)}u
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {rec.urgencyScore > 10 ? (
-                          <AlertCircle className="h-4 w-4 text-red-500 mr-1" />
-                        ) : rec.urgencyScore > 5 ? (
-                          <TrendingUp className="h-4 w-4 text-amber-500 mr-1" />
-                        ) : (
+                {recommendations.map((rec) => {
+                  const itemKey = `${rec.itemId}-${rec.warehouseFacilityId}`;
+                  const forecastQty = forecastQuantities[itemKey] || 0;
+                  
+                  // Get the full inventory item for validation
+                  const fullItem = currentInventoryData.find(item => 
+                    item.itemId === rec.itemId && 
+                    item.warehouseFacilityId === rec.warehouseFacilityId
+                  )!;
+                  
+                  // Validate data quality
+                  const dataQuality = ReplenishmentService.validateMonthlyDemandQuality(fullItem.monthlyDemand);
+                  
+                  // Calculate ROP using ReplenishmentService
+                  const ropResult = ReplenishmentService.calculateStatisticalROP(
+                    fullItem,
+                    'Blinkit',
+                    serviceLevel,
+                    forecastQty
+                  );
+                  
+                  return (
+                    <tr key={itemKey} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{rec.itemName}</div>
+                        <div className="text-sm text-gray-500">{rec.itemId}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {rec.warehouseFacilityName}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{rec.currentStock.toLocaleString()}</div>
+                        <div className="text-xs text-gray-500">units</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{rec.salesVelocity.toFixed(1)}</div>
+                        <div className="text-xs text-gray-500">units/day</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
                           <Clock className="h-4 w-4 text-gray-400 mr-1" />
+                          <span className={`text-sm font-medium ${
+                            rec.daysOfCover <= 0 ? 'text-red-600' : 
+                            rec.daysOfCover < 7 ? 'text-amber-600' : 'text-gray-900'
+                          }`}>
+                            {formatDaysOfCover(rec.daysOfCover)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{ropResult.safetyStock}</div>
+                        <div className="text-xs text-gray-500">
+                          {ropResult.calculationMethod === 'statistical' ? 'Statistical' : 'Simple'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center group relative">
+                          <div className="text-lg font-bold text-vyndo-orange">
+                            {ropResult.rop.toLocaleString()}
+                          </div>
+                          <Info className="h-4 w-4 text-gray-400 ml-2 cursor-help" />
+                          <div 
+                            className="hidden group-hover:block absolute rounded-xl shadow-2xl left-0 top-8"
+                            style={{ 
+                              backgroundColor: '#2a0e06', 
+                              opacity: 1, 
+                              zIndex: 9999, 
+                              position: 'absolute',
+                              border: '2px solid #ef5326',
+                              padding: '16px',
+                              color: '#ffffff',
+                              fontSize: '12px',
+                              minWidth: '320px',
+                              maxWidth: '400px',
+                              whiteSpace: 'normal',
+                              wordBreak: 'break-word',
+                              textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                            }}
+                          >
+                            <div className="font-semibold pb-2 mb-2" style={{ borderBottom: '1px solid #ef5326', color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>ROP Calculation</div>
+                            <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Avg Daily Demand: {ropResult.avgDailyDemand.toFixed(2)} units/day</div>
+                            <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Lead Time: {Math.round(ropResult.leadTimeMonths * 30)} days</div>
+                            <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Demand during Lead Time: {Math.round(ropResult.demandDuringLeadTime)} units</div>
+                            <div className="pt-2 mt-2" style={{ borderTop: '1px solid #ef5326' }}>
+                              <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Service Level: {ropResult.serviceLevel}% (Z = {ropResult.zScore})</div>
+                              {ropResult.calculationMethod === 'statistical' && (
+                                <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Std Deviation (σ): {ropResult.standardDeviation.toFixed(2)} units/month</div>
+                              )}
+                              <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Safety Stock: {ropResult.safetyStock} units</div>
+                              {forecastQty > 0 && (
+                                <div style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>Forecast Qty: +{forecastQty} units</div>
+                              )}
+                            </div>
+                            <div className="pt-2 mt-2 font-semibold" style={{ borderTop: '1px solid #ef5326', color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                              ROP = {Math.round(ropResult.demandDuringLeadTime)} + {ropResult.safetyStock} = {ropResult.rop} units
+                            </div>
+                            <div className="italic mt-2" style={{ color: '#ffffff', opacity: 0.8, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                              Method: {ropResult.calculationMethod === 'statistical' ? 'Statistical' : 'Simple (no monthly data)'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {rec.currentStock < ropResult.rop ? 'Below ROP' : 'Above ROP'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <input
+                          type="number"
+                          min="0"
+                          value={forecastQty}
+                          onChange={(e) => handleForecastQuantityChange(itemKey, parseInt(e.target.value) || 0)}
+                          className="w-20 rounded border-gray-300 text-sm focus:border-vyndo-orange focus:ring-vyndo-orange"
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {ropResult.calculationMethod === 'statistical' ? (
+                          <div className="flex items-center text-green-600">
+                            <svg className="h-5 w-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span className="text-sm font-medium">Sales File (12 Months)</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-amber-600">
+                            <AlertTriangle className="h-5 w-5 mr-1" />
+                            <span className="text-sm font-medium">Simple Fallback</span>
+                          </div>
                         )}
-                        <span className={`text-sm font-medium ${
-                          rec.urgencyScore > 10 ? 'text-red-600' :
-                          rec.urgencyScore > 5 ? 'text-amber-600' : 'text-gray-600'
-                        }`}>
-                          {rec.urgencyScore.toFixed(1)}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {!dataQuality.isValid || dataQuality.hasWarnings ? (
+                          <div className="group relative">
+                            <AlertTriangle className="h-5 w-5 text-amber-500 cursor-help" />
+                            <div 
+                              className="hidden group-hover:block absolute rounded-xl shadow-2xl right-0 top-6"
+                              style={{ 
+                                backgroundColor: '#2a0e06', 
+                                opacity: 1, 
+                                zIndex: 9999, 
+                                position: 'absolute',
+                                border: '2px solid #ef5326',
+                                padding: '16px',
+                                color: '#ffffff',
+                                fontSize: '12px',
+                                minWidth: '320px',
+                                maxWidth: '400px',
+                                whiteSpace: 'normal',
+                                wordBreak: 'break-word',
+                                textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                              }}
+                            >
+                              <div className="font-semibold mb-3" style={{ color: '#fbbf24', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>⚠️ Data Quality Issues Detected</div>
+                              
+                              {/* Show specific reasons */}
+                              <div className="space-y-1 mb-3" style={{ color: '#ffffff' }}>
+                                {dataQuality.warnings.map((warning, idx) => {
+                                  // Parse warning to show specific details
+                                  if (warning.includes('months of data')) {
+                                    const monthCount = warning.match(/\d+/)?.[0] || '0';
+                                    return (
+                                      <div key={idx} className="flex items-start" style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                        <span className="mr-2">•</span>
+                                        <span>Only <strong>{monthCount} months</strong> of sales history found (need 12 for accurate ROP)</span>
+                                      </div>
+                                    );
+                                  } else if (warning.includes('No demand data')) {
+                                    return (
+                                      <div key={idx} className="flex items-start" style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                        <span className="mr-2">•</span>
+                                        <span>No sales data available for this SKU</span>
+                                      </div>
+                                    );
+                                  } else if (warning.includes('High variability')) {
+                                    return (
+                                      <div key={idx} className="flex items-start" style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                        <span className="mr-2">•</span>
+                                        <span>Sales pattern is highly variable (CV &gt; 50%)</span>
+                                      </div>
+                                    );
+                                  } else {
+                                    return (
+                                      <div key={idx} className="flex items-start" style={{ color: '#ffffff', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                        <span className="mr-2">•</span>
+                                        <span>{warning}</span>
+                                      </div>
+                                    );
+                                  }
+                                })}
+                              </div>
+                              
+                              {/* Show fallback method */}
+                              <div className="italic mt-3 pt-3" style={{ color: '#ffffff', borderTop: '1px solid #ef5326', opacity: 0.9, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                <strong>Fallback:</strong> Using {ropResult.calculationMethod} calculation
+                              </div>
+                              
+                              {/* Show recommendation */}
+                              <div className="mt-3 pt-3" style={{ color: '#93c5fd', borderTop: '1px solid #ef5326', textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                                <strong>💡 Tip:</strong> Upload more sales history for better accuracy
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-green-600 text-sm">✓ OK</div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          {rec.urgencyScore > 10 ? (
+                            <AlertCircle className="h-4 w-4 text-red-500 mr-1" />
+                          ) : rec.urgencyScore > 5 ? (
+                            <TrendingUp className="h-4 w-4 text-amber-500 mr-1" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-gray-400 mr-1" />
+                          )}
+                          <span className={`text-sm font-medium ${
+                            rec.urgencyScore > 10 ? 'text-red-600' :
+                            rec.urgencyScore > 5 ? 'text-amber-600' : 'text-gray-600'
+                          }`}>
+                            {rec.urgencyScore.toFixed(1)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

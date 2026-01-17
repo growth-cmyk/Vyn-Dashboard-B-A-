@@ -190,7 +190,7 @@ export async function runFinalIntegrationTest(): Promise<boolean> {
     // Test 8: Storage Statistics (Task 23)
     console.log('\n📈 Testing Storage Statistics...');
     
-    const storageStats = HistoryService.getStorageStats();
+    const storageStats = await HistoryService.getStorageStats();
     console.log('✅ Storage statistics available');
     console.log(`   - Snapshots: ${storageStats.snapshots}`);
     console.log(`   - Item Snapshots: ${storageStats.itemSnapshots}`);

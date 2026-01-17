@@ -97,6 +97,14 @@ export interface InventoryItem {
   };
   // NEW: Upload date support for file-based history
   uploadDate?: Date | string; // Optional for backward compatibility
+  // NEW: Historical demand data for Statistical ROP Model
+  /**
+   * Array of 12 months of sales data (oldest to newest)
+   * Index 0 = 12 months ago, Index 11 = current month
+   * Used for calculating standard deviation and statistical safety stock
+   * If not available, system falls back to simple ROP calculation
+   */
+  monthlyDemand?: number[];
 }
 
 /**
@@ -552,6 +560,10 @@ export interface AdInventorySyncItem {
   daysOfCover?: number;
   recommendedAction: string;
   urgencyLevel: 'low' | 'medium' | 'high' | 'critical';
+  // NEW: ROP-based fields for enhanced decision-making
+  currentStock?: number;
+  rop?: number;
+  safetyStock?: number;
 }
 
 /**
@@ -744,4 +756,96 @@ export interface SalesValidationSchema {
     type: 'number';
     min: 0;
   };
+}
+
+
+// ============================================================================
+// Statistical ROP Model - Z-Table and Service Level Configuration
+// ============================================================================
+
+/**
+ * Z-score mappings for service levels (Standard Normal Distribution)
+ * Used for calculating statistical safety stock based on desired service level
+ * 
+ * Service Level = Probability of not experiencing a stockout during replenishment cycle
+ * Z-score = Number of standard deviations from the mean
+ * 
+ * Example: 95% service level means 95% probability of meeting demand during lead time
+ */
+export const Z_TABLE: Record<number, number> = {
+  85: 1.04,   // 85% service level
+  90: 1.28,   // 90% service level
+  95: 1.64,   // 95% service level (default)
+  98: 2.05,   // 98% service level
+  99: 2.33,   // 99% service level
+  99.8: 2.88  // 99.8% service level
+} as const;
+
+/**
+ * Default service level for statistical ROP calculations
+ * 95% provides good balance between inventory costs and stockout risk
+ */
+export const DEFAULT_SERVICE_LEVEL = 95;
+
+/**
+ * Default Z-score corresponding to 95% service level
+ */
+export const DEFAULT_Z_SCORE = Z_TABLE[DEFAULT_SERVICE_LEVEL];
+
+/**
+ * Available service levels for user selection
+ */
+export const SERVICE_LEVELS = [85, 90, 95, 98, 99, 99.8] as const;
+
+/**
+ * Statistical ROP calculation result
+ * Contains all components of the Reorder Point calculation using statistical methods
+ */
+export interface StatisticalROPResult {
+  /** Calculated Reorder Point (units) */
+  rop: number;
+  
+  /** Calculated Safety Stock (units) */
+  safetyStock: number;
+  
+  /** Average monthly demand over 12 months (units/month) */
+  avgMonthlyDemand: number;
+  
+  /** Average daily demand (units/day) */
+  avgDailyDemand: number;
+  
+  /** Standard deviation of monthly demand (σ) */
+  standardDeviation: number;
+  
+  /** Selected service level (%) */
+  serviceLevel: number;
+  
+  /** Z-score used for safety stock calculation */
+  zScore: number;
+  
+  /** Lead time converted to months */
+  leadTimeMonths: number;
+  
+  /** User-provided forecast quantity for demand spikes */
+  forecastQty: number;
+  
+  /** Expected demand during lead time (units) */
+  demandDuringLeadTime: number;
+  
+  /** Calculation method used */
+  calculationMethod: 'statistical' | 'simple';
+}
+
+/**
+ * Enhanced replenishment recommendation with Statistical ROP
+ */
+export interface EnhancedReplenishmentRecommendation extends ReplenishmentRecommendation {
+  /** Statistical ROP calculation result */
+  ropCalculation?: StatisticalROPResult;
+  
+  /** Current stock compared to ROP (negative = need to order) */
+  currentStockVsROP?: number;
+  
+  /** Days until stock reaches ROP at current sales velocity */
+  daysUntilROP?: number;
 }

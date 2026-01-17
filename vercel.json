@@ -2,7 +2,16 @@
   "buildCommand": "cd inventory-dashboard && npm run build",
   "outputDirectory": "inventory-dashboard/dist",
   "installCommand": "cd inventory-dashboard && npm install",
+  "functions": {
+    "api/**/*.ts": {
+      "runtime": "nodejs20.x"
+    }
+  },
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

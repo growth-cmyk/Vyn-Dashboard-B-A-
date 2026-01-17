@@ -172,7 +172,7 @@ export const CampaignCharts: React.FC<CampaignChartsProps> = ({
                 pointBorderWidth: 2,
                 pointRadius: 5,
                 pointHoverRadius: 7,
-                fill: '+1',
+                fill: true,
                 yAxisID: 'y1'
               }
             ]

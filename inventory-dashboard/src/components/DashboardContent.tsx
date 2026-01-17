@@ -1,8 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Upload, Filter, Search, AlertCircle, Loader2, FileText, BarChart3, FileSpreadsheet } from 'lucide-react';
 import type { InventoryItem, SalesRecord, FilterCriteria, Platform, CumulativeHistoryData, AdCampaignRecord } from '../types';
 import { PLATFORM } from '../types';
 import { DataService, FilterService, HistoryService } from '../services';
+import { BlobStorageService } from '../services/BlobStorageService';
+import { useBlobRehydration } from '../hooks/useBlobRehydration';
 import { PlatformContextService } from '../services/PlatformContextService';
 import { KpiDashboard } from './KpiDashboard';
 import { InventoryOverview } from './InventoryOverview';
@@ -12,6 +14,7 @@ import { Charts } from './Charts';
 import { ExportControls } from './ExportControls';
 import { ReplenishmentPlanner } from './ReplenishmentPlanner';
 import { MarketingDashboard } from './MarketingDashboard';
+import { LoadingTimeline } from './LoadingTimeline';
 
 interface DashboardState {
   inventoryData: InventoryItem[];
@@ -84,15 +87,59 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
     campaigns: false
   });
 
-  // File upload handlers with platform detection
+  const [uploadTimeline, setUploadTimeline] = useState<{
+    show: boolean;
+    steps: Array<{ label: string; status: 'pending' | 'active' | 'complete' | 'error' }>;
+  }>({
+    show: false,
+    steps: []
+  });
+
+  // Re-hydration hook - automatically loads data from Vercel Blob on mount
+  const { state: rehydrationState, data: rehydratedData } = useBlobRehydration(activePlatform);
+
+  // Apply re-hydrated data when available
+  useEffect(() => {
+    if (rehydrationState.isComplete && rehydrationState.hasData && !rehydrationState.error) {
+      console.log('🔄 Applying re-hydrated data to dashboard...');
+      setState(prev => ({
+        ...prev,
+        inventoryData: rehydratedData.inventory.length > 0 ? rehydratedData.inventory : prev.inventoryData,
+        salesData: rehydratedData.sales.length > 0 ? rehydratedData.sales : prev.salesData,
+        campaignData: rehydratedData.campaigns.length > 0 ? rehydratedData.campaigns : prev.campaignData,
+      }));
+    }
+  }, [rehydrationState.isComplete, rehydrationState.hasData, rehydrationState.error, rehydratedData]);
+
+  // File upload handlers with platform detection and cloud backup
   const handleInventoryUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     setUploadProgress(prev => ({ ...prev, inventory: true }));
+    
+    // Show upload timeline
+    setUploadTimeline({
+      show: true,
+      steps: [
+        { label: 'Reading file...', status: 'active' },
+        { label: 'Processing data...', status: 'pending' },
+        { label: '☁️ Backing up to Cloud...', status: 'pending' },
+        { label: 'Complete!', status: 'pending' }
+      ]
+    });
 
     try {
+      // Step 1: Read file
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          i === 0 ? { ...step, status: 'complete' } : 
+          i === 1 ? { ...step, status: 'active' } : step
+        )
+      }));
+
       // Use the enhanced method that detects cumulative history
       const result = await DataService.loadMasterInventoryDataWithHistory(file);
       const { items: inventoryData, cumulativeHistory, isHistoryFile } = result;
@@ -100,6 +147,15 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
       // Determine platform from the data
       const platform = inventoryData[0]?.platform || PLATFORM.BLINKIT;
       
+      // Step 2: Process data complete
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          i === 1 ? { ...step, status: 'complete' } : 
+          i === 2 ? { ...step, status: 'active' } : step
+        )
+      }));
+
       if (isHistoryFile && cumulativeHistory) {
         // Use bulk import for files with Upload Date columns
         await HistoryService.saveBulkSnapshots(
@@ -123,6 +179,29 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
         // Validate data quality
         const qualityCheck = DataService.validateDataQuality(cumulativeHistory);
         
+        // Step 3: Upload to Vercel Blob
+        try {
+          await BlobStorageService.uploadFile(file, 'inventory', platform);
+          console.log('✅ Inventory file backed up to Vercel Blob');
+          
+          setUploadTimeline(prev => ({
+            ...prev,
+            steps: prev.steps.map((step, i) => 
+              i === 2 ? { ...step, status: 'complete' } : 
+              i === 3 ? { ...step, status: 'complete' } : step
+            )
+          }));
+        } catch (blobError) {
+          console.warn('⚠️ Cloud backup failed, but data is saved locally:', blobError);
+          setUploadTimeline(prev => ({
+            ...prev,
+            steps: prev.steps.map((step, i) => 
+              i === 2 ? { ...step, status: 'error', label: '⚠️ Cloud backup failed (data saved locally)' } : 
+              i === 3 ? { ...step, status: 'complete' } : step
+            )
+          }));
+        }
+        
         setState(prev => ({ 
           ...prev, 
           inventoryData, 
@@ -133,6 +212,11 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
           dataQualityWarnings: qualityCheck.warnings
         }));
         setUploadProgress(prev => ({ ...prev, inventory: false }));
+        
+        // Hide timeline after 3 seconds
+        setTimeout(() => {
+          setUploadTimeline(prev => ({ ...prev, show: false }));
+        }, 3000);
       } else {
         // Fallback to single snapshot for files without date columns
         await HistoryService.saveInventorySnapshot(
@@ -142,6 +226,29 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
           platform,
           'blinkit'
         );
+        
+        // Step 3: Upload to Vercel Blob
+        try {
+          await BlobStorageService.uploadFile(file, 'inventory', platform);
+          console.log('✅ Inventory file backed up to Vercel Blob');
+          
+          setUploadTimeline(prev => ({
+            ...prev,
+            steps: prev.steps.map((step, i) => 
+              i === 2 ? { ...step, status: 'complete' } : 
+              i === 3 ? { ...step, status: 'complete' } : step
+            )
+          }));
+        } catch (blobError) {
+          console.warn('⚠️ Cloud backup failed, but data is saved locally:', blobError);
+          setUploadTimeline(prev => ({
+            ...prev,
+            steps: prev.steps.map((step, i) => 
+              i === 2 ? { ...step, status: 'error', label: '⚠️ Cloud backup failed (data saved locally)' } : 
+              i === 3 ? { ...step, status: 'complete' } : step
+            )
+          }));
+        }
         
         setState(prev => ({ 
           ...prev, 
@@ -153,14 +260,31 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
           dataQualityWarnings: []
         }));
         setUploadProgress(prev => ({ ...prev, inventory: false }));
+        
+        // Hide timeline after 3 seconds
+        setTimeout(() => {
+          setUploadTimeline(prev => ({ ...prev, show: false }));
+        }, 3000);
       }
     } catch (error) {
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          step.status === 'active' ? { ...step, status: 'error' } : step
+        )
+      }));
+      
       setState(prev => ({ 
         ...prev, 
         error: error instanceof Error ? error.message : 'Failed to load inventory data',
         isLoading: false 
       }));
       setUploadProgress(prev => ({ ...prev, inventory: false }));
+      
+      // Hide timeline after 5 seconds on error
+      setTimeout(() => {
+        setUploadTimeline(prev => ({ ...prev, show: false }));
+      }, 5000);
     }
   }, [state.salesData]);
 
@@ -170,8 +294,28 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
 
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     setUploadProgress(prev => ({ ...prev, sales: true }));
+    
+    // Show upload timeline
+    setUploadTimeline({
+      show: true,
+      steps: [
+        { label: 'Reading file...', status: 'active' },
+        { label: 'Processing data...', status: 'pending' },
+        { label: '☁️ Backing up to Cloud...', status: 'pending' },
+        { label: 'Complete!', status: 'pending' }
+      ]
+    });
 
     try {
+      // Step 1: Read file
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          i === 0 ? { ...step, status: 'complete' } : 
+          i === 1 ? { ...step, status: 'active' } : step
+        )
+      }));
+
       // Detect data format first
       const dataFormat = await DataService.detectDataFormat(file);
       let salesData: SalesRecord[];
@@ -184,21 +328,71 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
         salesData = await DataService.loadSalesData(file);
       }
 
+      // Step 2: Process data complete
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          i === 1 ? { ...step, status: 'complete' } : 
+          i === 2 ? { ...step, status: 'active' } : step
+        )
+      }));
+
+      // Step 3: Upload to Vercel Blob
+      try {
+        const platform = salesData[0]?.platform || activePlatform;
+        await BlobStorageService.uploadFile(file, 'sales', platform);
+        console.log('✅ Sales file backed up to Vercel Blob');
+        
+        setUploadTimeline(prev => ({
+          ...prev,
+          steps: prev.steps.map((step, i) => 
+            i === 2 ? { ...step, status: 'complete' } : 
+            i === 3 ? { ...step, status: 'complete' } : step
+          )
+        }));
+      } catch (blobError) {
+        console.warn('⚠️ Cloud backup failed, but data is saved locally:', blobError);
+        setUploadTimeline(prev => ({
+          ...prev,
+          steps: prev.steps.map((step, i) => 
+            i === 2 ? { ...step, status: 'error', label: '⚠️ Cloud backup failed (data saved locally)' } : 
+            i === 3 ? { ...step, status: 'complete' } : step
+          )
+        }));
+      }
+
       setState(prev => ({ 
         ...prev, 
         salesData, 
         isLoading: false 
       }));
       setUploadProgress(prev => ({ ...prev, sales: false }));
+      
+      // Hide timeline after 3 seconds
+      setTimeout(() => {
+        setUploadTimeline(prev => ({ ...prev, show: false }));
+      }, 3000);
     } catch (error) {
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          step.status === 'active' ? { ...step, status: 'error' } : step
+        )
+      }));
+      
       setState(prev => ({ 
         ...prev, 
         error: error instanceof Error ? error.message : 'Failed to load sales data',
         isLoading: false 
       }));
       setUploadProgress(prev => ({ ...prev, sales: false }));
+      
+      // Hide timeline after 5 seconds on error
+      setTimeout(() => {
+        setUploadTimeline(prev => ({ ...prev, show: false }));
+      }, 5000);
     }
-  }, []);
+  }, [activePlatform]);
 
   // Handle campaign Excel upload
   const handleCampaignUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,10 +401,62 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
 
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     setUploadProgress(prev => ({ ...prev, campaigns: true }));
+    
+    // Show upload timeline
+    setUploadTimeline({
+      show: true,
+      steps: [
+        { label: 'Reading Excel file...', status: 'active' },
+        { label: 'Processing campaigns...', status: 'pending' },
+        { label: '☁️ Backing up to Cloud...', status: 'pending' },
+        { label: 'Complete!', status: 'pending' }
+      ]
+    });
 
     try {
+      // Step 1: Read file
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          i === 0 ? { ...step, status: 'complete' } : 
+          i === 1 ? { ...step, status: 'active' } : step
+        )
+      }));
+
       // Load Excel campaign data using DataService - AWAIT COMPLETION
       const campaignData = await DataService.loadExcelCampaignData(file);
+      
+      // Step 2: Process data complete
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          i === 1 ? { ...step, status: 'complete' } : 
+          i === 2 ? { ...step, status: 'active' } : step
+        )
+      }));
+
+      // Step 3: Upload to Vercel Blob
+      try {
+        await BlobStorageService.uploadFile(file, 'campaign', activePlatform);
+        console.log('✅ Campaign file backed up to Vercel Blob');
+        
+        setUploadTimeline(prev => ({
+          ...prev,
+          steps: prev.steps.map((step, i) => 
+            i === 2 ? { ...step, status: 'complete' } : 
+            i === 3 ? { ...step, status: 'complete' } : step
+          )
+        }));
+      } catch (blobError) {
+        console.warn('⚠️ Cloud backup failed, but data is saved locally:', blobError);
+        setUploadTimeline(prev => ({
+          ...prev,
+          steps: prev.steps.map((step, i) => 
+            i === 2 ? { ...step, status: 'error', label: '⚠️ Cloud backup failed (data saved locally)' } : 
+            i === 3 ? { ...step, status: 'complete' } : step
+          )
+        }));
+      }
       
       // Update state with campaign data FIRST using functional update to avoid stale data
       setState(prev => ({ 
@@ -219,6 +465,11 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
         isLoading: false 
       }));
       setUploadProgress(prev => ({ ...prev, campaigns: false }));
+      
+      // Hide timeline after 3 seconds
+      setTimeout(() => {
+        setUploadTimeline(prev => ({ ...prev, show: false }));
+      }, 3000);
 
       // ONLY THEN navigate to marketing analysis view after state is updated
       if (onViewChange && campaignData.length > 0) {
@@ -228,14 +479,26 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
         }, 100);
       }
     } catch (error) {
+      setUploadTimeline(prev => ({
+        ...prev,
+        steps: prev.steps.map((step, i) => 
+          step.status === 'active' ? { ...step, status: 'error' } : step
+        )
+      }));
+      
       setState(prev => ({ 
         ...prev, 
         error: error instanceof Error ? error.message : 'Failed to load campaign data',
         isLoading: false 
       }));
       setUploadProgress(prev => ({ ...prev, campaigns: false }));
+      
+      // Hide timeline after 5 seconds on error
+      setTimeout(() => {
+        setUploadTimeline(prev => ({ ...prev, show: false }));
+      }, 5000);
     }
-  }, [onViewChange]);
+  }, [onViewChange, activePlatform]);
 
   // Filter handlers
   const handleFilterChange = useCallback((newFilters: Partial<FilterCriteria>) => {
@@ -312,6 +575,30 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
     if (activeView === 'data-management') {
       return (
         <div className="p-6"> {/* Removed extra top padding since main layout is fixed */}
+          {/* Re-hydration Loading Indicator */}
+          {rehydrationState.isRehydrating && (
+            <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex items-center">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600 mr-3" />
+                <div>
+                  <h3 className="text-sm font-medium text-blue-800">
+                    🔄 Re-hydrating from Cloud...
+                  </h3>
+                  <p className="text-sm text-blue-700 mt-1">
+                    Loading your previously uploaded data from Vercel Blob Storage
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Upload Timeline */}
+          {uploadTimeline.show && (
+            <div className="mb-6">
+              <LoadingTimeline steps={uploadTimeline.steps} />
+            </div>
+          )}
+
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
             <h2 className="text-lg font-semibold text-vyndo-text mb-4 flex items-center">
               <Upload className="h-5 w-5 mr-2" />
@@ -526,23 +813,73 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
           {/* Show additional dashboard content if data is available */}
           {(state.inventoryData.length > 0 || state.salesData.length > 0) && (
             <div className="space-y-6">
-              {/* Quick Stats Cards */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
-                <h3 className="text-lg font-semibold text-vyndo-text mb-4">Quick Overview</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                  <div>
-                    <div className="text-2xl font-bold text-vyndo-text">{state.inventoryData.length}</div>
-                    <div className="text-sm text-gray-600">Total SKUs</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-vyndo-text">{state.salesData.length}</div>
-                    <div className="text-sm text-gray-600">Sales Records</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-vyndo-text">
-                      {new Set(state.inventoryData.map(item => item.warehouseFacilityName)).size}
+              {/* Quick Overview - Modernized 3-Column Layout */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Total SKUs Card */}
+                <div className="bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-200/60 border-t-2 border-t-[#ef5326] rounded-2xl p-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Total SKUs</h4>
+                    <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center">
+                      <svg className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
                     </div>
-                    <div className="text-sm text-gray-600">Locations</div>
+                  </div>
+                  <div className="text-4xl font-bold text-vyndo-text mb-2">
+                    {state.inventoryData.length.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    Active products in inventory
+                  </div>
+                </div>
+
+                {/* Sales Records Card */}
+                <div className="bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-200/60 border-t-2 border-t-[#ef5326] rounded-2xl p-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Sales Records</h4>
+                    <div className="h-10 w-10 rounded-full bg-green-50 flex items-center justify-center">
+                      <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="text-4xl font-bold text-vyndo-text mb-2">
+                    {state.salesData.length.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    Transaction history loaded
+                  </div>
+                </div>
+
+                {/* Total Procurement Value Card */}
+                <div className="bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-200/60 border-t-2 border-t-[#ef5326] rounded-2xl p-8">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Procurement Value</h4>
+                    <div className="h-10 w-10 rounded-full bg-purple-50 flex items-center justify-center">
+                      <svg className="h-5 w-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="text-4xl font-bold text-vyndo-text mb-2">
+                    ₹{(() => {
+                      // Calculate total procurement value from replenishment data
+                      const { ReplenishmentService } = require('../services/ReplenishmentService');
+                      const replenishmentData = ReplenishmentService.calculateReplenishmentNeeds(
+                        state.inventoryData,
+                        95, // Default service level
+                        {} // No forecast quantities
+                      );
+                      const totalValue = replenishmentData.reduce((sum: number, item: any) => {
+                        // Estimate value: reorderQuantity × average selling price (₹198 from sample data)
+                        const avgPrice = 198; // Average from Blinkit data
+                        return sum + (item.reorderQuantity * avgPrice);
+                      }, 0);
+                      return (totalValue / 1000).toFixed(1);
+                    })()}K
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    Estimated reorder investment
                   </div>
                 </div>
               </div>

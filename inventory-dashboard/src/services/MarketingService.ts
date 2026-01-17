@@ -11,11 +11,77 @@ import type {
 } from '../types';
 import { STRATEGIC_ACTION, STOCK_STATUS } from '../types';
 import { AnalyticsService } from './AnalyticsService';
+import { ReplenishmentService } from './ReplenishmentService';
+import { storageLayer } from './StorageLayer';
 
 /**
  * Service for marketing analytics, campaign performance analysis, and strategic insights
+ * Enhanced with cloud data persistence via StorageLayer
  */
 export class MarketingService {
+  /**
+   * Save marketing campaign data to cloud storage
+   */
+  static async saveMarketingData(campaigns: AdCampaignRecord[]): Promise<void> {
+    // Convert AdCampaignRecord to MarketingSnapshot format for cloud storage
+    const marketingSnapshots = campaigns.map(campaign => ({
+      campaignName: campaign.campaignName,
+      campaignType: campaign.campaignType,
+      sku: campaign.sku,
+      platform: campaign.platform || 'blinkit', // Default platform
+      date: campaign.date,
+      budgetConsumed: campaign.budgetConsumed,
+      directSales: campaign.directSales,
+      indirectSales: campaign.indirectSales,
+      impressions: campaign.impressions,
+      uniqueClicks: campaign.uniqueClicks,
+      ctr: campaign.ctr,
+      addToCart: campaign.addToCart,
+      indirectAddToCart: campaign.indirectAddToCart,
+      quantitiesSold: campaign.quantitiesSold,
+      indirectQuantitiesSold: campaign.indirectQuantitiesSold,
+      newUsersAcquired: campaign.newUsersAcquired,
+      uploadTimestamp: new Date(),
+      uploadSource: 'marketing-upload',
+      metadata: {
+        originalCampaign: campaign
+      }
+    }));
+
+    await storageLayer.saveMarketingData(marketingSnapshots);
+  }
+
+  /**
+   * Get marketing campaign history from cloud storage
+   */
+  static async getMarketingHistory(platform?: string): Promise<AdCampaignRecord[]> {
+    const marketingSnapshots = await storageLayer.getMarketingHistory(platform as any);
+    
+    // Convert MarketingSnapshot back to AdCampaignRecord format
+    return marketingSnapshots.map(snapshot => ({
+      campaignName: snapshot.campaignName,
+      campaignType: snapshot.campaignType,
+      sku: snapshot.sku || '',
+      platform: snapshot.platform,
+      date: new Date(snapshot.date),
+      budgetConsumed: snapshot.budgetConsumed,
+      directSales: snapshot.directSales,
+      indirectSales: snapshot.indirectSales || 0,
+      impressions: snapshot.impressions || 0,
+      uniqueClicks: snapshot.uniqueClicks || 0,
+      ctr: snapshot.ctr,
+      addToCart: snapshot.addToCart || 0,
+      indirectAddToCart: snapshot.indirectAddToCart || 0,
+      quantitiesSold: snapshot.quantitiesSold || 0,
+      indirectQuantitiesSold: snapshot.indirectQuantitiesSold || 0,
+      newUsersAcquired: snapshot.newUsersAcquired || 0,
+      totalRoAS: this.calculateRoAS({
+        budgetConsumed: snapshot.budgetConsumed,
+        directSales: snapshot.directSales,
+        indirectSales: snapshot.indirectSales || 0
+      } as any)
+    }));
+  }
   /**
    * Calculate Return on Advertising Spend (RoAS) for a campaign
    * Formula: (Direct Sales + Indirect Sales) / Budget Consumed
@@ -206,9 +272,24 @@ export class MarketingService {
         current.budgetConsumed > best.budgetConsumed ? current : best
       );
 
-      // Generate strategic recommendation based on spend, inventory status, and RoAS
+      // Calculate ROP using ReplenishmentService (NEW)
+      const ropResult = ReplenishmentService.calculateStatisticalROP(
+        inventoryItem,
+        inventoryItem.platform || 'Blinkit',
+        95, // Default service level
+        0   // No forecast quantity
+      );
+
+      // Generate strategic recommendation based on spend, inventory status, ROP, and RoAS
       const campaignRoAS = this.calculateRoAS(mainCampaign);
-      const strategicAction = this.getStrategicRecommendation(totalSpend, stockAnalysis.stockStatus, campaignRoAS);
+      const strategicAction = this.getStrategicRecommendation(
+        totalSpend, 
+        stockAnalysis.stockStatus, 
+        campaignRoAS,
+        inventoryItem.totalSellable, // Current stock
+        ropResult.rop,               // ROP
+        ropResult.safetyStock        // Safety stock
+      );
       const urgencyLevel = this.calculateUrgencyLevel(totalSpend, stockAnalysis.stockStatus, stockAnalysis.daysOfCover);
 
       // Use actual product name if fuzzy matched, otherwise use campaign name
@@ -221,8 +302,19 @@ export class MarketingService {
         inventoryStatus: stockAnalysis.stockStatus,
         strategicAction,
         daysOfCover: stockAnalysis.daysOfCover,
-        recommendedAction: this.generateRecommendedAction(strategicAction, stockAnalysis, campaignRoAS),
-        urgencyLevel
+        recommendedAction: this.generateRecommendedAction(
+          strategicAction, 
+          stockAnalysis, 
+          campaignRoAS,
+          inventoryItem.totalSellable, // Current stock
+          ropResult.rop,               // ROP
+          ropResult.safetyStock        // Safety stock
+        ),
+        urgencyLevel,
+        // NEW: Include ROP data for display
+        currentStock: inventoryItem.totalSellable,
+        rop: ropResult.rop,
+        safetyStock: ropResult.safetyStock
       });
     });
 
@@ -387,38 +479,59 @@ export class MarketingService {
   }
 
   /**
-   * Generate strategic recommendation based on ad spend, inventory status, and RoAS performance
-   * ENHANCED: Apply 15-day Blinkit Lead Time, 18-day reorder point, and RoAS > 2.0 logic strictly
+   * Generate strategic recommendation based on ad spend, inventory status, ROP, and RoAS performance
+   * ENHANCED: Use ROP-based logic - PAUSE if below ROP, SCALE if above ROP + Safety Stock
    */
   static getStrategicRecommendation(
     adSpend: number, 
     stockStatus: StockStatus, 
-    roas?: number
+    roas?: number,
+    currentStock?: number,
+    rop?: number,
+    safetyStock?: number
   ): StrategicAction {
     // Define high spend threshold (could be configurable)
     const highSpendThreshold = 10000; // $10,000
     const isHighSpend = adSpend >= highSpendThreshold;
     const isHighRoAS = roas !== undefined && roas > 2.0;
 
+    // NEW ROP-BASED LOGIC: If ROP data is available, use it for decisions
+    if (currentStock !== undefined && rop !== undefined && safetyStock !== undefined) {
+      // Rule 1: Current Stock < ROP → PAUSE ADS (risk of stockout)
+      if (currentStock < rop) {
+        return STRATEGIC_ACTION.PAUSE_ADS;
+      }
+      
+      // Rule 2: Current Stock >= ROP but < (ROP + Safety Stock) → MONITOR (in safety zone)
+      if (currentStock < (rop + safetyStock)) {
+        return STRATEGIC_ACTION.MONITOR;
+      }
+      
+      // Rule 3: Current Stock >= (ROP + Safety Stock) AND high RoAS → SCALE ADS
+      if (isHighRoAS) {
+        return STRATEGIC_ACTION.SCALE_ADS;
+      }
+      
+      // Rule 4: Good stock but performance needs work → OPTIMIZE
+      return STRATEGIC_ACTION.OPTIMIZE;
+    }
+
+    // FALLBACK: Legacy stock status-based logic (when ROP not available)
     switch (stockStatus) {
       case STOCK_STATUS.OUT_OF_STOCK:
         return STRATEGIC_ACTION.PAUSE_ADS;
       
       case STOCK_STATUS.UNDERSTOCK:
-        // CRITICAL: Apply 18-day reorder point strictly
-        return STRATEGIC_ACTION.PAUSE_ADS; // Always pause for understock (< 18 days)
+        return STRATEGIC_ACTION.PAUSE_ADS;
       
       case STOCK_STATUS.HEALTHY:
-        // ENHANCED: Consider RoAS for healthy stock recommendations
         if (isHighRoAS && isHighSpend) {
-          return STRATEGIC_ACTION.SCALE_ADS; // High RoAS + High spend = Scale opportunity
+          return STRATEGIC_ACTION.SCALE_ADS;
         }
         return isHighSpend ? STRATEGIC_ACTION.OPTIMIZE : STRATEGIC_ACTION.MONITOR;
       
       case STOCK_STATUS.OVERSTOCK:
       case STOCK_STATUS.EXPIRY_RISK:
-        // CRITICAL: Apply Flash Promo logic (>90 days stock = SCALE ADS)
-        // ENHANCED: RoAS > 2.0 strengthens the scale recommendation
         return STRATEGIC_ACTION.SCALE_ADS;
       
       default:
@@ -460,16 +573,41 @@ export class MarketingService {
 
   /**
    * Generate detailed recommended action text
-   * ENHANCED: Clear action labels with 15-day lead time, 18-day reorder point, and RoAS > 2.0 logic
+   * ENHANCED: ROP-based action labels with clear guidance
    */
   private static generateRecommendedAction(
     strategicAction: StrategicAction, 
     stockAnalysis: any,
-    roas?: number
+    roas?: number,
+    currentStock?: number,
+    rop?: number,
+    safetyStock?: number
   ): string {
     const daysOfCover = Math.round(stockAnalysis.daysOfCover);
     const roasText = roas ? ` (RoAS: ${roas.toFixed(2)}x)` : '';
     
+    // NEW ROP-BASED MESSAGING: If ROP data available, use it
+    if (currentStock !== undefined && rop !== undefined && safetyStock !== undefined) {
+      switch (strategicAction) {
+        case STRATEGIC_ACTION.PAUSE_ADS:
+          return `PAUSE ADS - Stock below ROP! Current: ${currentStock}, ROP: ${rop}. Restock immediately.`;
+        
+        case STRATEGIC_ACTION.MONITOR:
+          return `MONITOR - In safety zone. Current: ${currentStock}, ROP: ${rop}, Target: ${rop + safetyStock}${roasText}.`;
+        
+        case STRATEGIC_ACTION.SCALE_ADS:
+          const roasBonus = roas && roas > 2.0 ? ' + High RoAS' : '';
+          return `SCALE ADS - Excellent stock levels${roasBonus}. Current: ${currentStock} (${Math.round((currentStock - rop) / safetyStock * 100)}% above ROP).`;
+        
+        case STRATEGIC_ACTION.OPTIMIZE:
+          return `OPTIMIZE - Good stock, improve performance${roasText}. Current: ${currentStock}, ROP: ${rop}.`;
+        
+        default:
+          return `Review campaign. Current: ${currentStock}, ROP: ${rop}${roasText}.`;
+      }
+    }
+    
+    // FALLBACK: Legacy messaging (when ROP not available)
     switch (strategicAction) {
       case STRATEGIC_ACTION.SCALE_ADS:
         if (daysOfCover > 90) {
@@ -482,9 +620,6 @@ export class MarketingService {
         return `SCALE ADS - Excess inventory (${daysOfCover} days). Increase ad spend to move stock.`;
       
       case STRATEGIC_ACTION.PAUSE_ADS:
-        if (daysOfCover < 18) {
-          return `PAUSE ADS - Restock Now! Only ${daysOfCover} days remaining (below 18-day reorder point).`;
-        }
         return `PAUSE ADS - Low inventory risk. ${daysOfCover} days of cover remaining.`;
       
       case STRATEGIC_ACTION.OPTIMIZE:

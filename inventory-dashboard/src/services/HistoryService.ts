@@ -1,5 +1,6 @@
 import type { InventoryItem, Platform, InventorySnapshot, CumulativeHistoryData } from '../types';
 import { PLATFORM } from '../types';
+import { storageLayer } from './StorageLayer';
 // import { AnalyticsService } from './AnalyticsService';
 
 /**
@@ -137,8 +138,8 @@ export class HistoryService {
       }
 
       // Get existing snapshots and merge with new ones (deduplication by timestamp)
-      const existingSnapshots = this.getInventoryHistory(undefined, undefined, platform);
-      const existingItemSnapshots = this.getItemSnapshots(undefined, undefined, platform);
+      const existingSnapshots = await this.getInventoryHistory(undefined, undefined, platform);
+      const existingItemSnapshots = await this.getItemSnapshots(undefined, undefined, platform);
 
       // Create a map for deduplication based on timestamp
       const snapshotMap = new Map<string, InventorySnapshot>();
@@ -191,7 +192,7 @@ export class HistoryService {
       localStorage.setItem(platformItemKey, JSON.stringify(recentItemSnapshots));
 
       // Check storage limits and compress if needed
-      const storageCheck = this.checkAndManageStorage(platform);
+      const storageCheck = await this.checkAndManageStorage(platform);
       if (storageCheck.wasCompressed) {
         console.log(`Storage compressed: saved ${storageCheck.compressionResult?.spaceSavedKB}KB, new size: ${storageCheck.stats.sizeMB.toFixed(2)}MB`);
       }
@@ -206,7 +207,7 @@ export class HistoryService {
   }
 
   /**
-   * Save inventory snapshot to localStorage with platform awareness
+   * Save inventory snapshot using Storage Layer (cloud-first with localStorage fallback)
    */
   static async saveInventorySnapshot(
     inventory: InventoryItem[], 
@@ -219,49 +220,10 @@ export class HistoryService {
       const timestamp = new Date();
       
       // Calculate summary statistics
-      // const analyses = inventory.map(item => AnalyticsService.analyzeStock(item));
       const totalUnits = inventory.reduce((sum, item) => sum + item.totalSellable, 0);
-      // const outOfStockCount = analyses.filter(a => a.stockStatus === STOCK_STATUS.OUT_OF_STOCK).length;
-      // const understockCount = analyses.filter(a => a.stockStatus === STOCK_STATUS.UNDERSTOCK).length;
-      // const overstockCount = analyses.filter(a => a.stockStatus === STOCK_STATUS.OVERSTOCK).length;
-      // const expiryRiskCount = analyses.filter(a => a.stockStatus === STOCK_STATUS.EXPIRY_RISK).length;
-      
-      // Estimate total value (simplified calculation)
-      // const totalValue = inventory.reduce((sum, item) => {
-      //   const avgPrice = salesData ? this.getAveragePrice(item.itemId, salesData) : 100;
-      //   return sum + (item.totalSellable * avgPrice);
-      // }, 0);
 
-      // Create platform-aware snapshot
-      const snapshot: InventorySnapshot = {
-        timestamp,
-        itemId: '', // Not used in summary snapshots
-        warehouseFacilityId: '', // Not used in summary snapshots
-        totalSellable: totalUnits,
-        uploadSource,
-        platform,
-        platformMetadata: {
-          uploadSource,
-          dataFormat,
-          recordCount: inventory.length
-        }
-      };
-
-      // Save platform-specific snapshots
-      const existingSnapshots = this.getInventoryHistory(undefined, undefined, platform);
-      existingSnapshots.push(snapshot);
-      
-      // Keep only the most recent snapshots per platform
-      if (existingSnapshots.length > this.MAX_SNAPSHOTS) {
-        existingSnapshots.splice(0, existingSnapshots.length - this.MAX_SNAPSHOTS);
-      }
-      
-      // Store with platform-specific key
-      const platformKey = `${this.SNAPSHOT_KEY}_${platform.toLowerCase()}`;
-      localStorage.setItem(platformKey, JSON.stringify(existingSnapshots));
-
-      // Save individual item snapshots for detailed tracking
-      const itemSnapshots: ItemSnapshot[] = inventory.map(item => ({
+      // Create individual snapshots for each item
+      const snapshots: InventorySnapshot[] = inventory.map(item => ({
         timestamp,
         itemId: item.itemId,
         warehouseFacilityId: item.warehouseFacilityId,
@@ -275,75 +237,35 @@ export class HistoryService {
         }
       }));
 
-      const existingItemSnapshots = this.getItemSnapshots(undefined, undefined, platform);
-      existingItemSnapshots.push(...itemSnapshots);
-      
-      // Keep only recent item snapshots (365 days for SKU movement analysis)
-      const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
-      const recentItemSnapshots = existingItemSnapshots.filter(
-        snapshot => new Date(snapshot.timestamp) > oneYearAgo
-      );
-      
-      const platformItemKey = `${this.ITEM_SNAPSHOT_KEY}_${platform.toLowerCase()}`;
-      localStorage.setItem(platformItemKey, JSON.stringify(recentItemSnapshots));
+      // Save through Storage Layer (handles cloud + local)
+      await storageLayer.saveInventorySnapshot(snapshots);
 
-      // Check storage limits and compress if needed
-      const storageCheck = this.checkAndManageStorage(platform);
-      if (storageCheck.wasCompressed) {
-        console.log(`Storage compressed: saved ${storageCheck.compressionResult?.spaceSavedKB}KB, new size: ${storageCheck.stats.sizeMB.toFixed(2)}MB`);
-      }
-
-      // Snapshot saved successfully
+      console.log(`Inventory snapshot saved: ${inventory.length} items, ${totalUnits} total units for platform ${platform}`);
     } catch (error) {
       console.error('Failed to save inventory snapshot:', error);
+      // Fallback to local storage if Storage Layer fails
+      this.saveToLocalStorageOnly(inventory, uploadSource, platform, dataFormat);
     }
   }
 
   /**
-   * Get inventory history with platform filtering
+   * Get inventory history using Storage Layer (cloud-first with localStorage fallback)
    */
-  static getInventoryHistory(
+  static async getInventoryHistory(
     _itemId?: string, 
     _facilityId?: string, 
     platform?: Platform
-  ): InventorySnapshot[] {
+  ): Promise<InventorySnapshot[]> {
     try {
-      let allSnapshots: InventorySnapshot[] = [];
-
-      if (platform && platform !== PLATFORM.ALL) {
-        // Get snapshots for specific platform
-        const platformKey = `${this.SNAPSHOT_KEY}_${platform.toLowerCase()}`;
-        const data = localStorage.getItem(platformKey);
-        if (data) {
-          const snapshots = JSON.parse(data);
-          allSnapshots = snapshots.map((snapshot: any) => ({
-            ...snapshot,
-            timestamp: new Date(snapshot.timestamp)
-          }));
-        }
-      } else {
-        // Get snapshots for all platforms
-        const platforms = [PLATFORM.BLINKIT, PLATFORM.AMAZON];
-        for (const p of platforms) {
-          const platformKey = `${this.SNAPSHOT_KEY}_${p.toLowerCase()}`;
-          const data = localStorage.getItem(platformKey);
-          if (data) {
-            const snapshots = JSON.parse(data);
-            const platformSnapshots = snapshots.map((snapshot: any) => ({
-              ...snapshot,
-              timestamp: new Date(snapshot.timestamp),
-              platform: p // Ensure platform is set
-            }));
-            allSnapshots.push(...platformSnapshots);
-          }
-        }
-      }
-
+      // Fetch from Storage Layer (cloud-first, local fallback)
+      const snapshots = await storageLayer.getInventoryHistory(platform);
+      
       // Sort by timestamp
-      return allSnapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      return snapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     } catch (error) {
-      console.error('Failed to load inventory history:', error);
-      return [];
+      console.error('Failed to load inventory history from Storage Layer:', error);
+      // Fallback to direct localStorage access
+      return this.getFromLocalStorageOnly(_itemId, _facilityId, platform);
     }
   }
 
@@ -530,28 +452,28 @@ export class HistoryService {
   /**
    * Get combined history data prioritizing file-based dates over localStorage
    */
-  static getCombinedHistoryData(
+  static async getCombinedHistoryData(
     fileHistory?: CumulativeHistoryData,
     platform?: Platform
-  ): TrendData {
+  ): Promise<TrendData> {
     // If we have file-based history, prioritize it
     if (fileHistory) {
       return this.generateFileBasedTrendData(fileHistory, platform);
     }
 
     // Fallback to localStorage-based trend data
-    return this.generateInventoryTrendData(undefined, undefined, platform);
+    return await this.generateInventoryTrendData(undefined, undefined, platform);
   }
 
   /**
-   * Generate trend data for visualization with platform awareness
-   * Enhanced to prioritize file-based dates over localStorage snapshots
+   * Generate trend data for visualization with cloud-first approach
+   * Enhanced to prioritize cloud data over localStorage snapshots
    */
-  static generateInventoryTrendData(
+  static async generateInventoryTrendData(
     itemId?: string, 
     facilityId?: string, 
     platform?: Platform
-  ): TrendData {
+  ): Promise<TrendData> {
     // First, check if we have current file-based history in sessionStorage
     if (platform && platform !== PLATFORM.ALL) {
       const sessionKey = `vyndo_current_file_history_${platform.toLowerCase()}`;
@@ -594,12 +516,57 @@ export class HistoryService {
       }
     }
 
-    // Fallback to localStorage-based snapshots
-    const snapshots = itemId || facilityId 
-      ? this.getItemSnapshots(itemId, facilityId, platform)
-      : this.getInventoryHistory(itemId, facilityId, platform);
+    // Fallback to cloud/localStorage-based snapshots via Storage Layer
+    try {
+      const snapshots = itemId || facilityId 
+        ? this.getItemSnapshots(itemId, facilityId, platform)
+        : await this.getInventoryHistory(itemId, facilityId, platform);
 
-    if (snapshots.length === 0) {
+      if (snapshots.length === 0) {
+        return {
+          labels: [],
+          datasets: [{
+            label: 'Total Units',
+            data: [],
+            borderColor: '#F36F21',
+            backgroundColor: 'rgba(243, 111, 33, 0.1)'
+          }]
+        };
+      }
+
+      const labels = snapshots.map(snapshot => 
+        snapshot.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      );
+
+      if (itemId || facilityId) {
+        // Item-level trend data
+        const itemSnapshots = snapshots as ItemSnapshot[];
+        return {
+          labels,
+          datasets: [{
+            label: 'Stock Level',
+            data: itemSnapshots.map(s => s.totalSellable),
+            borderColor: '#F36F21',
+            backgroundColor: 'rgba(243, 111, 33, 0.1)'
+          }]
+        };
+      } else {
+        // Summary trend data
+        const summarySnapshots = snapshots as InventorySnapshot[];
+        return {
+          labels,
+          datasets: [
+            {
+              label: 'Total Units',
+              data: summarySnapshots.map(s => s.totalSellable),
+              borderColor: '#F36F21',
+              backgroundColor: 'rgba(243, 111, 33, 0.1)'
+            }
+          ]
+        };
+      }
+    } catch (error) {
+      console.error('Failed to generate trend data:', error);
       return {
         labels: [],
         datasets: [{
@@ -610,43 +577,123 @@ export class HistoryService {
         }]
       };
     }
+  }
 
-    const labels = snapshots.map(snapshot => 
-      snapshot.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    );
+  /**
+   * Sync pending data to cloud (exposed method for manual sync)
+   */
+  static async syncPendingData(): Promise<any> {
+    return await storageLayer.syncToCloud();
+  }
 
-    if (itemId || facilityId) {
-      // Item-level trend data
-      const itemSnapshots = snapshots as ItemSnapshot[];
-      return {
-        labels,
-        datasets: [{
-          label: 'Stock Level',
-          data: itemSnapshots.map(s => s.totalSellable),
-          borderColor: '#F36F21',
-          backgroundColor: 'rgba(243, 111, 33, 0.1)'
-        }]
+  /**
+   * Get current sync status
+   */
+  static getSyncStatus(): any {
+    return storageLayer.getSyncStatus();
+  }
+
+  /**
+   * Subscribe to sync status changes
+   */
+  static onSyncStatusChange(callback: (status: any) => void): void {
+    storageLayer.onSyncStatusChange(callback);
+  }
+
+  /**
+   * Fallback method for localStorage-only operations (when Storage Layer fails)
+   */
+  private static saveToLocalStorageOnly(
+    inventory: InventoryItem[], 
+    uploadSource: string,
+    platform: Platform = PLATFORM.BLINKIT,
+    dataFormat: 'blinkit' | 'amazon' = 'blinkit'
+  ): void {
+    try {
+      const timestamp = new Date();
+      const totalUnits = inventory.reduce((sum, item) => sum + item.totalSellable, 0);
+
+      // Create platform-aware snapshot
+      const snapshot: InventorySnapshot = {
+        timestamp,
+        itemId: '', // Not used in summary snapshots
+        warehouseFacilityId: '', // Not used in summary snapshots
+        totalSellable: totalUnits,
+        uploadSource,
+        platform,
+        platformMetadata: {
+          uploadSource,
+          dataFormat,
+          recordCount: inventory.length
+        }
       };
-    } else {
-      // Summary trend data
-      const summarySnapshots = snapshots as InventorySnapshot[];
-      return {
-        labels,
-        datasets: [
-          {
-            label: 'Total Units',
-            data: summarySnapshots.map(s => s.totalSellable),
-            borderColor: '#F36F21',
-            backgroundColor: 'rgba(243, 111, 33, 0.1)'
-          }
-        ]
-      };
+
+      // Save platform-specific snapshots
+      const existingSnapshots = this.getFromLocalStorageOnly(undefined, undefined, platform);
+      existingSnapshots.push(snapshot);
+      
+      // Keep only the most recent snapshots per platform
+      if (existingSnapshots.length > this.MAX_SNAPSHOTS) {
+        existingSnapshots.splice(0, existingSnapshots.length - this.MAX_SNAPSHOTS);
+      }
+      
+      // Store with platform-specific key
+      const platformKey = `${this.SNAPSHOT_KEY}_${platform.toLowerCase()}`;
+      localStorage.setItem(platformKey, JSON.stringify(existingSnapshots));
+
+      console.log(`Fallback: Inventory snapshot saved to localStorage only for platform ${platform}`);
+    } catch (error) {
+      console.error('Failed to save to localStorage fallback:', error);
     }
   }
 
   /**
-   * Clear all history data (with platform support)
+   * Fallback method for localStorage-only retrieval (when Storage Layer fails)
    */
+  private static getFromLocalStorageOnly(
+    _itemId?: string, 
+    _facilityId?: string, 
+    platform?: Platform
+  ): InventorySnapshot[] {
+    try {
+      let allSnapshots: InventorySnapshot[] = [];
+
+      if (platform && platform !== PLATFORM.ALL) {
+        // Get snapshots for specific platform
+        const platformKey = `${this.SNAPSHOT_KEY}_${platform.toLowerCase()}`;
+        const data = localStorage.getItem(platformKey);
+        if (data) {
+          const snapshots = JSON.parse(data);
+          allSnapshots = snapshots.map((snapshot: any) => ({
+            ...snapshot,
+            timestamp: new Date(snapshot.timestamp)
+          }));
+        }
+      } else {
+        // Get snapshots for all platforms
+        const platforms = [PLATFORM.BLINKIT, PLATFORM.AMAZON];
+        for (const p of platforms) {
+          const platformKey = `${this.SNAPSHOT_KEY}_${p.toLowerCase()}`;
+          const data = localStorage.getItem(platformKey);
+          if (data) {
+            const snapshots = JSON.parse(data);
+            const platformSnapshots = snapshots.map((snapshot: any) => ({
+              ...snapshot,
+              timestamp: new Date(snapshot.timestamp),
+              platform: p // Ensure platform is set
+            }));
+            allSnapshots.push(...platformSnapshots);
+          }
+        }
+      }
+
+      // Sort by timestamp
+      return allSnapshots.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    } catch (error) {
+      console.error('Failed to load from localStorage fallback:', error);
+      return [];
+    }
+  }
   static clearHistoryData(platform?: Platform): void {
     try {
       if (platform && platform !== PLATFORM.ALL) {
@@ -678,19 +725,19 @@ export class HistoryService {
   /**
    * Get storage usage statistics with platform breakdown
    */
-  static getStorageStats(platform?: Platform): { 
+  static async getStorageStats(platform?: Platform): Promise<{ 
     snapshots: number; 
     itemSnapshots: number; 
     sizeKB: number;
     sizeMB: number;
     isNearLimit: boolean;
     platformBreakdown?: Record<Platform, { snapshots: number; itemSnapshots: number }>;
-  } {
+  }> {
     try {
       if (platform && platform !== PLATFORM.ALL) {
         // Get stats for specific platform
-        const snapshots = this.getInventoryHistory(undefined, undefined, platform).length;
-        const itemSnapshots = this.getItemSnapshots(undefined, undefined, platform).length;
+        const snapshots = (await this.getInventoryHistory(undefined, undefined, platform)).length;
+        const itemSnapshots = (await this.getItemSnapshots(undefined, undefined, platform)).length;
         
         const platformKey = `${this.SNAPSHOT_KEY}_${platform.toLowerCase()}`;
         const platformItemKey = `${this.ITEM_SNAPSHOT_KEY}_${platform.toLowerCase()}`;
@@ -711,8 +758,8 @@ export class HistoryService {
 
         const platforms = [PLATFORM.BLINKIT, PLATFORM.AMAZON];
         for (const p of platforms) {
-          const snapshots = this.getInventoryHistory(undefined, undefined, p).length;
-          const itemSnapshots = this.getItemSnapshots(undefined, undefined, p).length;
+          const snapshots = (await this.getInventoryHistory(undefined, undefined, p)).length;
+          const itemSnapshots = (await this.getItemSnapshots(undefined, undefined, p)).length;
           
           platformBreakdown[p] = { snapshots, itemSnapshots };
           totalSnapshots += snapshots;
@@ -748,11 +795,11 @@ export class HistoryService {
    * Compress old data to reduce storage usage
    * Compresses snapshots older than COMPRESSION_THRESHOLD_DAYS
    */
-  static compressOldData(platform?: Platform): { 
+  static async compressOldData(platform?: Platform): Promise<{ 
     compressedSnapshots: number; 
     spaceSavedKB: number; 
     newSizeMB: number; 
-  } {
+  }> {
     try {
       const compressionDate = new Date(Date.now() - this.COMPRESSION_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
       let totalCompressed = 0;
@@ -765,8 +812,8 @@ export class HistoryService {
         const platformItemKey = `${this.ITEM_SNAPSHOT_KEY}_${p.toLowerCase()}`;
         
         // Get current data
-        const snapshots = this.getInventoryHistory(undefined, undefined, p);
-        const itemSnapshots = this.getItemSnapshots(undefined, undefined, p);
+        const snapshots = await this.getInventoryHistory(undefined, undefined, p);
+        const itemSnapshots = await this.getItemSnapshots(undefined, undefined, p);
         
         // Separate old and recent data
         const recentSnapshots = snapshots.filter(s => s.timestamp > compressionDate);
@@ -796,7 +843,7 @@ export class HistoryService {
         totalSpaceSaved += spaceSaved;
       }
 
-      const stats = this.getStorageStats(platform);
+      const stats = await this.getStorageStats(platform);
       
       return {
         compressedSnapshots: totalCompressed,
@@ -851,17 +898,17 @@ export class HistoryService {
   /**
    * Check storage limits and automatically compress if needed
    */
-  static checkAndManageStorage(platform?: Platform): {
+  static async checkAndManageStorage(platform?: Platform): Promise<{
     wasCompressed: boolean;
-    stats: ReturnType<typeof HistoryService.getStorageStats>;
-    compressionResult?: ReturnType<typeof HistoryService.compressOldData>;
-  } {
-    const stats = this.getStorageStats(platform);
+    stats: Awaited<ReturnType<typeof HistoryService.getStorageStats>>;
+    compressionResult?: Awaited<ReturnType<typeof HistoryService.compressOldData>>;
+  }> {
+    const stats = await this.getStorageStats(platform);
     
     if (stats.isNearLimit) {
       console.warn(`Storage approaching limit: ${stats.sizeMB.toFixed(2)}MB / ${this.MAX_STORAGE_SIZE_MB}MB`);
-      const compressionResult = this.compressOldData(platform);
-      const newStats = this.getStorageStats(platform);
+      const compressionResult = await this.compressOldData(platform);
+      const newStats = await this.getStorageStats(platform);
       
       return {
         wasCompressed: true,

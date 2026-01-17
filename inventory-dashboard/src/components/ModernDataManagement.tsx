@@ -53,11 +53,18 @@ export const ModernDataManagement: React.FC<ModernDataManagementProps> = ({
     }));
 
     try {
+      // Step 1: Upload to Vercel Blob Storage
+      const { BlobStorageService } = await import('../services/BlobStorageService');
+      const blobResult = await BlobStorageService.uploadFile(file, 'inventory', 'Blinkit');
+      console.log('📦 Inventory file stored in Vercel Blob:', blobResult.blobUrl);
+
+      // Step 2: Process the file data
       const inventoryData = await DataService.loadInventoryData(file);
       
-      // Save inventory snapshot for historical tracking
+      // Step 3: Save inventory snapshot for historical tracking
       await HistoryService.saveInventorySnapshot(inventoryData, file.name, []);
       
+      // Step 4: Update dashboard
       onInventoryUpload(inventoryData);
       
       setUploadState(prev => ({
@@ -89,7 +96,15 @@ export const ModernDataManagement: React.FC<ModernDataManagementProps> = ({
     }));
 
     try {
+      // Step 1: Upload to Vercel Blob Storage
+      const { BlobStorageService } = await import('../services/BlobStorageService');
+      const blobResult = await BlobStorageService.uploadFile(file, 'sales', 'Blinkit');
+      console.log('📦 Sales file stored in Vercel Blob:', blobResult.blobUrl);
+
+      // Step 2: Process the file data
       const salesData = await DataService.loadSalesData(file);
+      
+      // Step 3: Update dashboard
       onSalesUpload(salesData);
       
       setUploadState(prev => ({
