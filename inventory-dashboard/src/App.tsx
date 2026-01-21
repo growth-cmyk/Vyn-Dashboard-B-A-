@@ -6,13 +6,17 @@ import { ThemeService } from './services/ThemeService';
 import { UserPreferenceService } from './services/UserPreferenceService';
 import { PlatformContextService } from './services/PlatformContextService';
 import { MigrationService } from './services/MigrationService';
-import type { Platform } from './types';
+import { DataService } from './services/DataService';
+import type { Platform, InventoryItem } from './types';
 import { PLATFORM } from './types';
+import type { UserRole } from './components/RoleToggle';
 import './App.css';
 
 function App() {
-  const [activeView, setActiveView] = useState<'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis'>('data-management');
+  const [activeView, setActiveView] = useState<'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations'>('data-management');
   const [activePlatform, setActivePlatform] = useState<Platform>(PLATFORM.BLINKIT);
+  const [activeRole, setActiveRole] = useState<UserRole>('founder');
+  const [inventoryData, setInventoryData] = useState<InventoryItem[]>([]);
   
   // Re-hydration hook for cloud sync status
   const { state: rehydrationState } = useBlobRehydration(activePlatform);
@@ -25,6 +29,21 @@ function App() {
     : rehydrationState.hasData 
     ? 'synced' 
     : 'offline';
+
+  // Load inventory data for stockout alerts
+  useEffect(() => {
+    const loadInventory = async () => {
+      try {
+        const data = await DataService.getInventoryData(activePlatform);
+        setInventoryData(data);
+      } catch (error) {
+        console.warn('Failed to load inventory data:', error);
+        setInventoryData([]);
+      }
+    };
+    
+    loadInventory();
+  }, [activePlatform]);
 
   // Initialize theme and preferences on app startup
   useEffect(() => {
@@ -90,13 +109,24 @@ function App() {
     initializeApp();
   }, []);
 
-  const handleViewChange = (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => {
+  const handleViewChange = (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations') => {
     setActiveView(view);
   };
 
   const handlePlatformChange = (platform: Platform) => {
     setActivePlatform(platform);
     PlatformContextService.setActivePlatform(platform);
+  };
+
+  const handleRoleChange = (role: UserRole) => {
+    setActiveRole(role);
+    
+    // Auto-navigate to appropriate default view for role
+    if (role === 'founder') {
+      setActiveView('executive-dashboard');
+    } else if (role === 'warehouse') {
+      setActiveView('regional-operations');
+    }
   };
 
   return (
@@ -110,6 +140,9 @@ function App() {
         activePlatform={activePlatform}
         onPlatformChange={handlePlatformChange}
         cloudSyncStatus={cloudSyncStatus}
+        activeRole={activeRole}
+        onRoleChange={handleRoleChange}
+        inventoryData={inventoryData}
       >
         <DashboardContent 
           activeView={activeView} 

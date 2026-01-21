@@ -54,3 +54,13 @@ export { MarketingAnalysis } from './MarketingAnalysis';
 export { MarketingKPICards } from './MarketingKPICards';
 export { MarketingDashboard } from './MarketingDashboard';
 export { CampaignCharts } from './CampaignCharts';
+
+// Executive Command Center v2.0 Components
+export { ExecutiveDashboard } from './ExecutiveDashboard';
+export { RegionalOperationsView } from './RegionalOperationsView';
+export { BrandHealthGauge } from './BrandHealthGauge';
+export { GeographicBubbleChart } from './GeographicBubbleChart';
+export { CollapsibleDetailTable } from './CollapsibleDetailTable';
+export { VisualProgressRing } from './VisualProgressRing';
+export { RoleToggle } from './RoleToggle';
+export { CloudSyncIndicator } from './CloudSyncIndicator';

@@ -1,13 +1,18 @@
-# Vyndo Analytics Platform v1.1 - Data Schema
+# Vyndo Analytics Platform v2.0 - Data Schema
 
 ## Overview
-This document defines all data structures, types, and schemas used in the Vyndo Analytics Platform, including cloud persistence models and statistical ROP calculations.
+This document defines all data structures, types, and schemas used in the Vyndo Analytics Platform, including cloud persistence models, statistical ROP calculations, and Executive Command Center v2.0 predictive analytics types.
 
 ## Core Data Types
 
 ### Platform
 ```typescript
 type Platform = 'Blinkit' | 'Amazon' | 'All';
+```
+
+### UserRole (NEW in v2.0)
+```typescript
+type UserRole = 'founder' | 'warehouse';
 ```
 
 ### InventoryItem
@@ -28,7 +33,7 @@ interface InventoryItem {
   last30Days: number;
   platform?: Platform;
   uploadDate?: Date | string;
-  monthlyDemand?: number[]; // NEW: 12-month demand history for Statistical ROP
+  monthlyDemand?: number[]; // 12-month demand history for Statistical ROP
 }
 ```
 
@@ -80,7 +85,93 @@ interface AdCampaignRecord {
 }
 ```
 
-## Cloud Persistence Models (NEW in v1.1)
+## Executive Command Center v2.0 Types (NEW)
+
+### SalesDataPoint
+```typescript
+interface SalesDataPoint {
+  date: Date;
+  quantity: number;
+  sku: string;
+  platform: 'blinkit' | 'amazon';
+}
+```
+
+### UrgencyLevel
+```typescript
+interface UrgencyLevel {
+  level: 1 | 2 | 3;
+  label: 'Critical' | 'High' | 'Medium';
+  color: 'red' | 'yellow' | 'green';
+}
+```
+
+### PriorityShippingItem
+```typescript
+interface PriorityShippingItem {
+  sku: string;
+  productName: string;
+  currentStock: number;
+  statisticalROP: number;
+  stockoutDate: Date | null;
+  urgencyLevel: UrgencyLevel;
+  targetFeeder: string;
+  quantityToShip: number;
+  salesVelocity: number;
+}
+```
+
+### BrandHealthMetrics
+```typescript
+interface BrandHealthMetrics {
+  overallScore: number;           // 0-100
+  stockAvailability: number;      // 0-100
+  turnoverRate: number;           // 0-100
+  expiryRisk: number;             // 0-100
+  replenishmentEfficiency: number; // 0-100
+  platformScores?: {
+    blinkit?: number;
+    amazon?: number;
+  };
+  trend?: 'up' | 'down' | 'stable';
+  trendPercentage?: number;
+}
+```
+
+### GeographicDataPoint
+```typescript
+interface GeographicDataPoint {
+  region: string;                 // 'Ahmedabad', 'Mumbai', 'Bangalore'
+  salesVolume: number;            // Total units sold
+  revenue: number;                // Total revenue
+  growthRate: number;             // Percentage growth
+  roi?: number;                   // Return on investment
+  marketShare?: number;           // Percentage of total market
+}
+```
+
+### SKUMovementStatus (NEW in v2.0)
+```typescript
+type SKUMovementStatus = 'Moving' | 'Idle' | 'Critical';
+
+interface SKUMovementItem {
+  sku: string;
+  productName: string;
+  status: SKUMovementStatus;
+  velocity: number;               // Units per day
+  currentStock: number;
+  daysOfStock: number;
+  lastMovement: number;           // Days since last sale
+}
+
+interface SKUMovementStats {
+  moving: number;                 // Count of Moving SKUs
+  idle: number;                   // Count of Idle SKUs
+  critical: number;               // Count of Critical SKUs
+}
+```
+
+## Cloud Persistence Models
 
 ### InventorySnapshot
 ```typescript
@@ -134,7 +225,7 @@ interface BlobUploadResult {
 }
 ```
 
-## Statistical ROP Models (NEW in v1.1)
+## Statistical ROP Models
 
 ### StatisticalROPResult
 ```typescript
@@ -240,7 +331,7 @@ CREATE INDEX idx_marketing_history_platform_date ON marketing_history (platform,
 CREATE INDEX idx_marketing_history_sku ON marketing_history (sku);
 ```
 
-### user_preferences Table (NEW in v1.1)
+### user_preferences Table
 ```sql
 CREATE TABLE user_preferences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -257,7 +348,7 @@ CREATE TABLE user_preferences (
 CREATE INDEX idx_user_preferences_user_id ON user_preferences (user_id);
 ```
 
-### sku_demand_history Table (NEW in v1.1)
+### sku_demand_history Table
 ```sql
 CREATE TABLE sku_demand_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -338,6 +429,12 @@ const PLATFORM_CONFIG: Record<Platform, PlatformConfig> = {
 };
 ```
 
+### PredictionService Constants (NEW in v2.0)
+```typescript
+export const BLINKIT_LEAD_TIME = 15; // days
+export const AMAZON_LEAD_TIME = 7;   // days
+```
+
 ### Stock Status Thresholds
 ```typescript
 const STOCK_THRESHOLDS = {
@@ -348,6 +445,22 @@ const STOCK_THRESHOLDS = {
   OVERSTOCK_DAYS: 45,
   EXPIRY_RISK_DAYS: 180
 };
+```
+
+### SKU Movement Thresholds (NEW in v2.0)
+```typescript
+const SKU_MOVEMENT_THRESHOLDS = {
+  MOVING_VELOCITY_MIN: 5,           // units/day
+  MOVING_LAST_MOVEMENT_MAX: 7,      // days
+  IDLE_VELOCITY_MAX: 1,             // units/day
+  IDLE_LAST_MOVEMENT_MIN: 30,       // days
+  CRITICAL_STOCKOUT_DAYS: 7         // days
+};
+```
+
+### Stockout Alert Threshold (NEW in v2.0)
+```typescript
+const STOCKOUT_ALERT_THRESHOLD = 7; // days
 ```
 
 ## Data Validation Rules
@@ -393,7 +506,7 @@ const STOCK_THRESHOLDS = {
 4. Dashboard populates with re-hydrated data
 5. User sees last uploaded data automatically
 
-### Demand Map Flow (NEW in v1.1)
+### Demand Map Flow
 1. User uploads Sales CSV
 2. DataService.buildDemandMapFromSales() extracts 12-month demand
 3. Demand map stored in memory (Map<itemId, number[]>)
@@ -401,6 +514,24 @@ const STOCK_THRESHOLDS = {
 5. AnalyticsService.calculateStatisticalROP() uses demand map
 6. On app reload, demand map loaded from Supabase
 
+### Priority Shipping Flow (NEW in v2.0)
+1. User selects feeder warehouse in Regional Operations
+2. PredictionService.generatePriorityShippingList() calculates urgency
+3. List sorted by urgency level, stockout date, sales velocity
+4. User clicks "Generate Shipping Manifest"
+5. CSV file generated with all required columns
+6. Browser downloads manifest file
+
+### Stockout Alert Flow (NEW in v2.0)
+1. App loads inventory data for active platform
+2. stockoutAlerts.hasStockoutAlert() checks all SKUs
+3. If any SKU has daysUntilStockout ≤ 7, alert triggered
+4. Pulsing red dot appears on Regional Operations tab
+5. Alert only visible in Warehouse Team role
+6. Alert updates in real-time as inventory changes
+
 ## Version History
 - **v1.0.0**: Initial data schema with core models
 - **v1.1.0**: Added cloud persistence models, Statistical ROP types, demand history schema
+- **v2.0.0**: Added Executive Command Center types, PredictionService models, role-based types, stockout alert schema
+

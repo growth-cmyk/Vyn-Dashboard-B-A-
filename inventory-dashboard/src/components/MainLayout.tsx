@@ -12,32 +12,39 @@ import {
 import { ThemeToggle } from './ThemeToggle';
 import { PlatformSwitcher } from './PlatformSwitcher';
 import { CloudSyncIndicator } from './CloudSyncIndicator';
+import { RoleToggle, type UserRole } from './RoleToggle';
 import { UserPreferenceService } from '../services/UserPreferenceService';
-import type { Platform } from '../types';
+import type { Platform, InventoryItem } from '../types';
 import { PLATFORM } from '../types';
+import { hasStockoutAlert } from '../utils/stockoutAlerts';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis';
-  onViewChange: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => void;
+  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations';
+  onViewChange: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations') => void;
   activePlatform?: Platform;
   onPlatformChange?: (platform: Platform) => void;
   cloudSyncStatus?: 'syncing' | 'synced' | 'offline' | 'error';
+  activeRole?: UserRole;
+  onRoleChange?: (role: UserRole) => void;
+  inventoryData?: InventoryItem[];
 }
 
 interface NavItem {
-  id: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis';
+  id: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations';
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  roles: UserRole[]; // Which roles can see this nav item
 }
 
 const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutGrid },
-  { id: 'inventory', label: 'Inventory Health', icon: Package },
-  { id: 'sales', label: 'Sales Performance', icon: TrendingUp },
-  { id: 'marketing-analysis', label: 'Marketing Analysis', icon: Megaphone },
-  { id: 'action-center', label: 'Action Center', icon: AlertCircle },
-  { id: 'data-management', label: 'Data Management', icon: UploadCloud },
+  { id: 'executive-dashboard', label: 'Executive Dashboard', icon: TrendingUp, roles: ['founder'] },
+  { id: 'sales', label: 'Sales Performance', icon: TrendingUp, roles: ['founder'] },
+  { id: 'marketing-analysis', label: 'Marketing Analysis', icon: Megaphone, roles: ['founder'] },
+  { id: 'data-management', label: 'Data Management', icon: UploadCloud, roles: ['founder'] },
+  { id: 'regional-operations', label: 'Regional Operations', icon: Package, roles: ['warehouse'] },
+  { id: 'inventory', label: 'Inventory Health', icon: Package, roles: ['warehouse'] },
+  { id: 'action-center', label: 'Action Center', icon: AlertCircle, roles: ['warehouse'] },
 ];
 
 export const MainLayout: React.FC<MainLayoutProps> = ({ 
@@ -46,9 +53,15 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   onViewChange,
   activePlatform = PLATFORM.BLINKIT,
   onPlatformChange = () => {},
-  cloudSyncStatus = 'offline'
+  cloudSyncStatus = 'offline',
+  activeRole = 'founder',
+  onRoleChange = () => {},
+  inventoryData = []
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // Calculate stockout alert for Regional Operations
+  const showStockoutAlert = hasStockoutAlert(inventoryData);
 
   // Initialize active view from user preferences
   useEffect(() => {
@@ -121,52 +134,65 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
 
         {/* Navigation */}
         <nav className="flex-1 p-4 pt-6 space-y-2 overflow-y-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeView === item.id;
-            
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  onViewChange(item.id);
-                  setIsSidebarOpen(false);
-                }}
-                className={`
-                  w-full flex items-center space-x-3 px-6 py-3 rounded-2xl
-                  transition-all duration-200 text-left font-semibold text-sm
-                  focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-800
-                  ${isActive 
-                    ? 'text-white shadow-sm' 
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100'
-                  }
-                `}
-                style={isActive ? {
-                  backgroundColor: 'var(--platform-primary, #ef5326)',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
-                } : {}}
-                onMouseEnter={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = 'rgba(241, 245, 249, 0.7)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
-              >
-                <Icon className="h-5 w-5 flex-shrink-0" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+          {navItems
+            .filter(item => item.roles.includes(activeRole))
+            .map((item) => {
+              const Icon = item.icon;
+              const isActive = activeView === item.id;
+              const hasAlert = item.id === 'regional-operations' && showStockoutAlert;
+              
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onViewChange(item.id);
+                    setIsSidebarOpen(false);
+                  }}
+                  className={`
+                    w-full flex items-center space-x-3 px-6 py-3 rounded-2xl
+                    transition-all duration-200 text-left font-semibold text-sm
+                    focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-800
+                    relative
+                    ${isActive 
+                      ? 'text-white shadow-sm' 
+                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100'
+                    }
+                  `}
+                  style={isActive ? {
+                    backgroundColor: 'var(--platform-primary, #ef5326)',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+                  } : {}}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.backgroundColor = 'rgba(241, 245, 249, 0.7)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  <span className="flex-1">{item.label}</span>
+                  {hasAlert && (
+                    <span className="relative flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
         </nav>
 
-        {/* Sidebar Footer with Theme Toggle and Cloud Sync */}
+        {/* Sidebar Footer with Role Toggle, Theme Toggle and Cloud Sync */}
         <div className="p-4 border-t border-slate-200/60 dark:border-slate-700/60 flex-shrink-0 space-y-3"> {/* Subtle borders */}
           {/* Cloud Sync Indicator */}
           <CloudSyncIndicator status={cloudSyncStatus} className="mb-3" />
+          
+          {/* Role Toggle */}
+          <RoleToggle activeRole={activeRole} onRoleChange={onRoleChange} />
           
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Theme</span> {/* Professional font weight */}

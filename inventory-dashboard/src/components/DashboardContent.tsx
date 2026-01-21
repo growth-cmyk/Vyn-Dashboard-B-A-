@@ -15,6 +15,8 @@ import { ExportControls } from './ExportControls';
 import { ReplenishmentPlanner } from './ReplenishmentPlanner';
 import { MarketingDashboard } from './MarketingDashboard';
 import { LoadingTimeline } from './LoadingTimeline';
+import { ExecutiveDashboard } from './ExecutiveDashboard';
+import { RegionalOperationsView } from './RegionalOperationsView';
 
 interface DashboardState {
   inventoryData: InventoryItem[];
@@ -31,8 +33,8 @@ interface DashboardState {
 }
 
 interface DashboardContentProps {
-  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis';
-  onViewChange?: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis') => void;
+  activeView: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations';
+  onViewChange?: (view: 'dashboard' | 'inventory' | 'sales' | 'action-center' | 'data-management' | 'marketing-analysis' | 'executive-dashboard' | 'regional-operations') => void;
   activePlatform?: Platform;
   onPlatformChange?: (platform: Platform) => void;
 }
@@ -558,6 +560,29 @@ export const DashboardContent: React.FC<DashboardContentProps> = ({
 
   // Render content based on active view
   const renderContent = () => {
+    if (activeView === 'executive-dashboard') {
+      return (
+        <div className="p-6">
+          <ExecutiveDashboard
+            inventoryData={filteredInventory}
+            salesData={filteredSales}
+            activePlatform={activePlatform}
+          />
+        </div>
+      );
+    }
+
+    if (activeView === 'regional-operations') {
+      return (
+        <div className="p-6">
+          <RegionalOperationsView
+            inventoryData={filteredInventory}
+            activePlatform={activePlatform}
+          />
+        </div>
+      );
+    }
+
     if (activeView === 'marketing-analysis') {
       return <MarketingDashboard 
         activePlatform={activePlatform} 
